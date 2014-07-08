@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  * 
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -323,7 +323,7 @@ LDAP_F ( int ) ldap_pvt_discard LDAP_P((
 LDAP_F( int )
 ldap_parse_ldif_record_x LDAP_P((
 	struct berval *rbuf,
-	int linenum,
+	unsigned long linenum,
 	struct ldifrecord *lr,
 	const char *errstr,
 	unsigned int flags,
@@ -430,6 +430,9 @@ LDAP_F (int) ldap_pvt_tls_get_my_dn LDAP_P(( void *ctx, struct berval *dn,
 LDAP_F (int) ldap_pvt_tls_get_peer_dn LDAP_P(( void *ctx, struct berval *dn,
 	LDAPDN_rewrite_dummy *func, unsigned flags ));
 LDAP_F (int) ldap_pvt_tls_get_strength LDAP_P(( void *ctx ));
+LDAP_F (int) ldap_pvt_tls_get_unique LDAP_P(( void *ctx, struct berval *buf, int is_server ));
+LDAP_F (const char *) ldap_pvt_tls_get_version LDAP_P(( void *ctx ));
+LDAP_F (const char *) ldap_pvt_tls_get_cipher LDAP_P(( void *ctx ));
 
 LDAP_END_DECL
 

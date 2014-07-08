@@ -341,6 +341,7 @@ memberof_value_modify(
 	memberof_t	*mo = (memberof_t *)on->on_bi.bi_private;
 
 	Operation	op2 = *op;
+	unsigned long opid = op->o_opid;
 	SlapReply	rs2 = { REP_RESULT };
 	slap_callback	cb = { NULL, slap_null_cb, NULL, NULL };
 	Modifications	mod[ 2 ] = { { { 0 } } }, *ml;
@@ -358,6 +359,7 @@ memberof_value_modify(
 	op2.orm_modlist = NULL;
 
 	/* Internal ops, never replicate these */
+	op2.o_opid = 0;		/* shared with op, saved above */
 	op2.orm_no_opattrs = 1;
 	op2.o_dont_replicate = 1;
 
@@ -472,6 +474,8 @@ memberof_value_modify(
 			slap_mods_free( ml, 1 );
 		}
 	}
+	/* restore original opid */
+	op->o_opid = opid;
 
 	/* FIXME: if old_group_ndn doesn't exist, both delete __and__
 	 * add will fail; better split in two operations, although
@@ -817,6 +821,7 @@ memberof_op_modify( Operation *op, SlapReply *rs )
 				switch ( ml->sml_op ) {
 				case LDAP_MOD_DELETE:
 				case LDAP_MOD_REPLACE:
+				case SLAP_MOD_SOFTDEL: /* ITS#7487: can be used by syncrepl (in mirror mode?) */
 					save_member = 1;
 					break;
 				}
@@ -844,6 +849,7 @@ memberof_op_modify( Operation *op, SlapReply *rs )
 		
 				switch ( ml->sml_op ) {
 				case LDAP_MOD_DELETE:
+				case SLAP_MOD_SOFTDEL: /* ITS#7487: can be used by syncrepl (in mirror mode?) */
 					/* we don't care about cancellations: if the value
 					 * exists, fine; if it doesn't, we let the underlying
 					 * database fail as appropriate; */
@@ -858,6 +864,8 @@ memberof_op_modify( Operation *op, SlapReply *rs )
  					}
  
 				case LDAP_MOD_ADD:
+				case SLAP_MOD_SOFTADD: /* ITS#7487 */
+				case SLAP_MOD_ADD_IF_NOT_PRESENT: /* ITS#7487 */
 					/* NOTE: right now, the attributeType we use
 					 * for member must have a normalized value */
 					assert( ml->sml_nvalues != NULL );
@@ -946,6 +954,7 @@ memberof_op_modify( Operation *op, SlapReply *rs )
 
 		switch ( ml->sml_op ) {
 		case LDAP_MOD_DELETE:
+		case SLAP_MOD_SOFTDEL: /* ITS#7487: can be used by syncrepl (in mirror mode?) */
 			if ( ml->sml_nvalues != NULL ) {
 				AccessControlState	acl_state = ACL_STATE_INIT;
 
@@ -1056,12 +1065,15 @@ memberof_op_modify( Operation *op, SlapReply *rs )
 				goto done2;
 			}
 
-			if ( ml->sml_op == LDAP_MOD_DELETE || !ml->sml_values ) {
+			if ( ml->sml_op == LDAP_MOD_DELETE || ml->sml_op == SLAP_MOD_SOFTDEL || !ml->sml_values ) {
 				break;
 			}
 			/* fall thru */
 
-		case LDAP_MOD_ADD: {
+		case LDAP_MOD_ADD:
+		case SLAP_MOD_SOFTADD: /* ITS#7487 */
+		case SLAP_MOD_ADD_IF_NOT_PRESENT: /* ITS#7487 */
+			{
 			AccessControlState	acl_state = ACL_STATE_INIT;
 
 			for ( i = 0; !BER_BVISNULL( &ml->sml_nvalues[ i ] ); i++ ) {
@@ -1363,6 +1375,7 @@ memberof_res_modify( Operation *op, SlapReply *rs )
 
 		switch ( mml->sml_op ) {
 		case LDAP_MOD_DELETE:
+		case SLAP_MOD_SOFTDEL: /* ITS#7487: can be used by syncrepl (in mirror mode?) */
 			if ( vals != NULL ) {
 				for ( i = 0; !BER_BVISNULL( &vals[ i ] ); i++ ) {
 					memberof_value_modify( op,
@@ -1396,6 +1409,8 @@ memberof_res_modify( Operation *op, SlapReply *rs )
 			/* fall thru */
 
 		case LDAP_MOD_ADD:
+		case SLAP_MOD_SOFTADD: /* ITS#7487 */
+		case SLAP_MOD_ADD_IF_NOT_PRESENT: /* ITS#7487 */
 			assert( vals != NULL );
 
 			for ( i = 0; !BER_BVISNULL( &vals[ i ] ); i++ ) {
@@ -1420,6 +1435,7 @@ memberof_res_modify( Operation *op, SlapReply *rs )
 
 			switch ( ml->sml_op ) {
 			case LDAP_MOD_DELETE:
+			case SLAP_MOD_SOFTDEL: /* ITS#7487: can be used by syncrepl (in mirror mode?) */
 				vals = ml->sml_nvalues;
 				if ( vals != NULL ) {
 					for ( i = 0; !BER_BVISNULL( &vals[ i ] ); i++ ) {
@@ -1445,12 +1461,14 @@ memberof_res_modify( Operation *op, SlapReply *rs )
 					}
 				}
 	
-				if ( ml->sml_op == LDAP_MOD_DELETE || !ml->sml_values ) {
+				if ( ml->sml_op == LDAP_MOD_DELETE || ml->sml_op == SLAP_MOD_SOFTDEL || !ml->sml_values ) {
 					break;
 				}
 				/* fall thru */
 	
 			case LDAP_MOD_ADD:
+			case SLAP_MOD_SOFTADD: /* ITS#7487 */
+			case SLAP_MOD_ADD_IF_NOT_PRESENT : /* ITS#7487 */
 				assert( ml->sml_nvalues != NULL );
 				vals = ml->sml_nvalues;
 				for ( i = 0; !BER_BVISNULL( &vals[ i ] ); i++ ) {

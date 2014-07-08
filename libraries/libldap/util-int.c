@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * Portions Copyright 1998 A. Hartgers.
  * All rights reserved.
  *
@@ -70,17 +70,12 @@ extern int h_errno;
 
 /* USE_GMTIME_R and USE_LOCALTIME_R defined in ldap_pvt.h */
 
-#ifdef LDAP_DEVEL
-	/* to be released with 2.5 */
 #if !defined( USE_GMTIME_R ) || !defined( USE_LOCALTIME_R )
 	/* we use the same mutex for gmtime(3) and localtime(3)
 	 * because implementations may use the same buffer
 	 * for both functions */
 	static ldap_pvt_thread_mutex_t ldap_int_gmtime_mutex;
 #endif
-#else /* ! LDAP_DEVEL */
-	ldap_pvt_thread_mutex_t ldap_int_gmtime_mutex;
-#endif /* ! LDAP_DEVEL */
 
 # if defined(HAVE_GETHOSTBYNAME_R) && \
 	(GETHOSTBYNAME_R_NARGS < 5) || (6 < GETHOSTBYNAME_R_NARGS)
@@ -612,9 +607,6 @@ void ldap_int_utils_init( void )
 
 	ldap_pvt_thread_mutex_init( &ldap_int_gettime_mutex );
 
-#ifdef HAVE_CYRUS_SASL
-	ldap_pvt_thread_mutex_init( &ldap_int_sasl_mutex );
-#endif
 #ifdef HAVE_GSSAPI
 	ldap_pvt_thread_mutex_init( &ldap_int_gssapi_mutex );
 #endif

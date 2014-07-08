@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2003-2012 The OpenLDAP Foundation.
+ * Copyright 2003-2014 The OpenLDAP Foundation.
  * Portions Copyright 2003 IBM Corporation.
  * Portions Copyright 2003-2009 Symas Corporation.
  * All rights reserved.
@@ -37,7 +37,6 @@
 
 #include "config.h"
 
-#ifdef LDAP_DEVEL
 /*
  * Control that allows to access the private DB
  * instead of the public one
@@ -53,7 +52,6 @@
  * Monitoring
  */
 #define PCACHE_MONITOR
-#endif
 
 /* query cache structs */
 /* query */
@@ -2438,6 +2436,7 @@ pcache_response(
 
 	if ( si->swap_saved_attrs ) {
 		rs->sr_attrs = si->save_attrs;
+		rs->sr_attr_flags = slap_attr_flags( si->save_attrs );
 		op->ors_attrs = si->save_attrs;
 	}
 
@@ -2793,17 +2792,16 @@ pcache_op_privdb(
 	/* map tag to operation */
 	type = slap_req2op( op->o_tag );
 	if ( type != SLAP_OP_LAST ) {
-		BI_op_func	**func;
+		BackendInfo	*bi = cm->db.bd_info;
 		int		rc;
 
 		/* execute, if possible */
-		func = &cm->db.be_bind;
-		if ( func[ type ] != NULL ) {
+		if ( (&bi->bi_op_bind)[ type ] ) {
 			Operation	op2 = *op;
 	
 			op2.o_bd = &cm->db;
 
-			rc = func[ type ]( &op2, rs );
+			rc = (&bi->bi_op_bind)[ type ]( &op2, rs );
 			if ( type == SLAP_OP_BIND && rc == LDAP_SUCCESS ) {
 				op->o_conn->c_authz_cookie = cm->db.be_private;
 			}
@@ -3210,6 +3208,10 @@ get_attr_set(
 		int found = 1;
 
 		if ( count > qm->attr_sets[i].count ) {
+			if ( qm->attr_sets[i].count &&
+				bvmatch( &qm->attr_sets[i].attrs[0].an_name, slap_bv_all_user_attrs )) {
+				break;
+			}
 			continue;
 		}
 

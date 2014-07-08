@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -165,6 +165,7 @@ struct ldaptls {
 	char		*lt_ciphersuite;
 	char		*lt_crlfile;
 	char		*lt_randfile;	/* OpenSSL only */
+	char		*lt_ecname;		/* OpenSSL only */
 	int		lt_protocol_min;
 };
 #endif
@@ -250,6 +251,7 @@ struct ldapoptions {
 #define ldo_tls_certfile	ldo_tls_info.lt_certfile
 #define ldo_tls_keyfile	ldo_tls_info.lt_keyfile
 #define ldo_tls_dhfile	ldo_tls_info.lt_dhfile
+#define ldo_tls_ecname	ldo_tls_info.lt_ecname
 #define ldo_tls_cacertfile	ldo_tls_info.lt_cacertfile
 #define ldo_tls_cacertdir	ldo_tls_info.lt_cacertdir
 #define ldo_tls_ciphersuite	ldo_tls_info.lt_ciphersuite
@@ -305,6 +307,7 @@ typedef struct ldap_conn {
 #ifdef HAVE_CYRUS_SASL
 	void		*lconn_sasl_authctx;	/* context for bind */
 	void		*lconn_sasl_sockctx;	/* for security layer */
+	void		*lconn_sasl_cbind;		/* for channel binding */
 #endif
 #ifdef HAVE_GSSAPI
 	void		*lconn_gss_ctx;		/* gss_ctx_id_t */
@@ -493,9 +496,6 @@ struct ldap {
 LDAP_V ( ldap_pvt_thread_mutex_t ) ldap_int_resolv_mutex;
 LDAP_V ( ldap_pvt_thread_mutex_t ) ldap_int_hostname_mutex;
 
-#ifdef HAVE_CYRUS_SASL
-LDAP_V( ldap_pvt_thread_mutex_t ) ldap_int_sasl_mutex;
-#endif
 #ifdef HAVE_GSSAPI
 LDAP_V( ldap_pvt_thread_mutex_t ) ldap_int_gssapi_mutex;
 #endif

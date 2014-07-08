@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -1503,6 +1503,21 @@ int slap_sasl_external(
 	return LDAP_SUCCESS;
 }
 
+int slap_sasl_cbinding( Connection *conn, struct berval *cbv )
+{
+#ifdef SASL_CHANNEL_BINDING
+	sasl_channel_binding_t *cb = ch_malloc( sizeof(*cb) + cbv->bv_len );;
+	cb->name = "ldap";
+	cb->critical = 0;
+	cb->data = (char *)(cb+1);
+	cb->len = cbv->bv_len;
+	memcpy( cb->data, cbv->bv_val, cbv->bv_len );
+	sasl_setprop( conn->c_sasl_authctx, SASL_CHANNEL_BINDING, cb );
+	conn->c_sasl_cbind = cb;
+#endif
+	return LDAP_SUCCESS;
+}
+
 int slap_sasl_reset( Connection *conn )
 {
 	return LDAP_SUCCESS;
@@ -1567,6 +1582,9 @@ int slap_sasl_close( Connection *conn )
 
 	free( conn->c_sasl_extra );
 	conn->c_sasl_extra = NULL;
+
+	free( conn->c_sasl_cbind );
+	conn->c_sasl_cbind = NULL;
 
 #elif defined(SLAP_BUILTIN_SASL)
 	SASL_CTX *ctx = conn->c_sasl_authctx;

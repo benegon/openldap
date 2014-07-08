@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2000-2012 The OpenLDAP Foundation.
+ * Copyright 2000-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -223,9 +223,40 @@ mdb_db_open( BackendDB *be, ConfigReply *cr )
 
 		if ( i == MDB_ID2ENTRY )
 			mdb_set_compare( txn, mdb->mi_dbis[i], mdb_id_compare );
-		else if ( i == MDB_DN2ID )
+		else if ( i == MDB_DN2ID ) {
+			MDB_cursor *mc;
+			MDB_val key, data;
+			ID id;
 			mdb_set_dupsort( txn, mdb->mi_dbis[i], mdb_dup_compare );
-
+			/* check for old dn2id format */
+			rc = mdb_cursor_open( txn, mdb->mi_dbis[i], &mc );
+			/* first record is always ID 0 */
+			rc = mdb_cursor_get( mc, &key, &data, MDB_FIRST );
+			if ( rc == 0 ) {
+				rc = mdb_cursor_get( mc, &key, &data, MDB_NEXT );
+				if ( rc == 0 ) {
+					int len;
+					unsigned char *ptr;
+					ptr = data.mv_data;
+					len = (ptr[0] & 0x7f) << 8 | ptr[1];
+					if (data.mv_size < 2*len + 4 + 2*sizeof(ID)) {
+						snprintf( cr->msg, sizeof(cr->msg),
+						"database \"%s\": DN index needs upgrade, "
+						"run \"slapindex entryDN\".",
+						be->be_suffix[0].bv_val );
+						Debug( LDAP_DEBUG_ANY,
+							LDAP_XSTRING(mdb_db_open) ": %s\n",
+							cr->msg, 0, 0 );
+						if ( !(slapMode & SLAP_TOOL_READMAIN ))
+							rc = LDAP_OTHER;
+						mdb->mi_flags |= MDB_NEED_UPGRADE;
+					}
+				}
+			}
+			mdb_cursor_close( mc );
+			if ( rc == LDAP_OTHER )
+				goto fail;
+		}
 	}
 
 	rc = mdb_ad_read( mdb, txn );
@@ -234,14 +265,23 @@ mdb_db_open( BackendDB *be, ConfigReply *cr )
 		goto fail;
 	}
 
-	rc = mdb_attr_dbs_open( be, txn, cr );
-	if ( rc ) {
-		mdb_txn_abort( txn );
-		goto fail;
+	/* slapcat doesn't need indexes. avoid a failure if
+	 * a configured index wasn't created yet.
+	 */
+	if ( !(slapMode & SLAP_TOOL_READONLY) ) {
+		rc = mdb_attr_dbs_open( be, txn, cr );
+		if ( rc ) {
+			mdb_txn_abort( txn );
+			goto fail;
+		}
 	}
 
 	rc = mdb_txn_commit(txn);
 	if ( rc != 0 ) {
+		Debug( LDAP_DEBUG_ANY,
+			LDAP_XSTRING(mdb_db_open) ": database %s: "
+			"txn_commit failed: %s (%d)\n",
+			be->be_suffix[0].bv_val, mdb_strerror(rc), rc );
 		goto fail;
 	}
 

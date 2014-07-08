@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * Portions Copyright 1998-2003 Kurt D. Zeilenga.
  * Portions Copyright 2003 IBM Corporation.
  * All rights reserved.
@@ -92,7 +92,7 @@ usage( int tool, const char *progname )
 		break;
 
 	case SLAPTEST:
-		options = " [-n databasenumber] [-u]\n";
+		options = " [-n databasenumber] [-u] [-Q]\n";
 		break;
 
 	case SLAPSCHEMA:
@@ -456,7 +456,7 @@ slap_tool_init(
 			} break;
 
 		case 'j':	/* jump to linenumber */
-			if ( lutil_atoi( &jumpline, optarg ) ) {
+			if ( lutil_atoul( &jumpline, optarg ) ) {
 				usage( tool, progname );
 			}
 			break;
@@ -786,6 +786,11 @@ slap_tool_init(
 		ber_memfree( nbase.bv_val );
 		BER_BVZERO( &nbase );
 
+		if( be == NULL ) {
+			fprintf( stderr, "%s: slap_init no backend for \"%s\"\n",
+				progname, base.bv_val );
+			exit( EXIT_FAILURE );
+		}
 		switch ( tool ) {
 		case SLAPACL:
 			goto startup;
@@ -794,11 +799,6 @@ slap_tool_init(
 			break;
 		}
 
-		if( be == NULL ) {
-			fprintf( stderr, "%s: slap_init no backend for \"%s\"\n",
-				progname, base.bv_val );
-			exit( EXIT_FAILURE );
-		}
 		/* If the named base is a glue master, operate on the
 		 * entire context
 		 */

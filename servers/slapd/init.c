@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -59,7 +59,8 @@ BerVarray default_referral = NULL;
  * global variables that need mutex protection
  */
 ldap_pvt_thread_pool_t	connection_pool;
-int			connection_pool_max = SLAP_MAX_WORKER_THREADS;
+int		connection_pool_max = SLAP_MAX_WORKER_THREADS;
+int		connection_pool_queues = 1;
 int		slap_tool_thread_max = 1;
 
 slap_counters_t			slap_counters, *slap_counters_list;
@@ -135,8 +136,8 @@ slap_init( int mode, const char *name )
 
 		slap_name = name;
 
-		ldap_pvt_thread_pool_init( &connection_pool,
-				connection_pool_max, 0);
+		ldap_pvt_thread_pool_init_q( &connection_pool,
+				connection_pool_max, 0, connection_pool_queues);
 
 		slap_counters_init( &slap_counters );
 
@@ -211,12 +212,15 @@ slap_init( int mode, const char *name )
 
 int slap_startup( Backend *be )
 {
+	int rc;
 	Debug( LDAP_DEBUG_TRACE,
 		"%s startup: initiated.\n",
 		slap_name, 0, 0 );
 
-
-	return backend_startup( be );
+	rc = backend_startup( be );
+	if ( !rc && ( slapMode & SLAP_SERVER_MODE ))
+		slapMode |= SLAP_SERVER_RUNNING;
+	return rc;
 }
 
 int slap_shutdown( Backend *be )

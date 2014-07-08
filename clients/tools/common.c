@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * Portions Copyright 2003 Kurt D. Zeilenga.
  * Portions Copyright 2003 IBM Corporation.
  * All rights reserved.
@@ -66,7 +66,7 @@ int		nocanon = 0;
 int		referrals = 0;
 int		verbose = 0;
 int		ldif = 0;
-ber_len_t	ldif_wrap = LDIF_LINE_WIDTH;
+ber_len_t	ldif_wrap = 0;
 char		*prog = NULL;
 
 /* connection */
@@ -1620,11 +1620,13 @@ tool_bind( LDAP *ld )
 		}
 	}
 
-	rc = ldap_parse_result( ld, result, &err, &matched, &info, &refs,
-		&ctrls, 1 );
-	if ( rc != LDAP_SUCCESS ) {
-		tool_perror( "ldap_bind parse result", rc, NULL, matched, info, refs );
-		tool_exit( ld, LDAP_LOCAL_ERROR );
+	if ( result ) {
+		rc = ldap_parse_result( ld, result, &err, &matched, &info, &refs,
+		                        &ctrls, 1 );
+		if ( rc != LDAP_SUCCESS ) {
+			tool_perror( "ldap_bind parse result", rc, NULL, matched, info, refs );
+			tool_exit( ld, LDAP_LOCAL_ERROR );
+		}
 	}
 
 #ifdef LDAP_CONTROL_PASSWORDPOLICYREQUEST

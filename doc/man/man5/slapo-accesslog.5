@@ -1,5 +1,5 @@
 .TH SLAPO-ACCESSLOG 5 "RELEASEDATE" "OpenLDAP LDVERSION"
-.\" Copyright 2005-2012 The OpenLDAP Foundation All Rights Reserved.
+.\" Copyright 2005-2014 The OpenLDAP Foundation All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
 .\" $OpenLDAP$
 .SH NAME
@@ -102,7 +102,7 @@ succeed or not. The default is FALSE.
 .SH EXAMPLES
 .LP
 .nf
-	database bdb
+	database mdb
 	suffix dc=example,dc=com
 	\...
 	overlay accesslog
@@ -111,7 +111,7 @@ succeed or not. The default is FALSE.
 	logbase search|compare ou=testing,dc=example,dc=com
 	logold (objectclass=person)
 
-	database bdb
+	database mdb
 	suffix cn=log
 	\...
 	index reqStart eq

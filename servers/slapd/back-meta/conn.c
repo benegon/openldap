@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1999-2012 The OpenLDAP Foundation.
+ * Copyright 1999-2014 The OpenLDAP Foundation.
  * Portions Copyright 2001-2003 Pierangelo Masarati.
  * Portions Copyright 1999-2003 Howard Chu.
  * All rights reserved.
@@ -421,6 +421,8 @@ retry_lock:;
 	ldap_set_option( msc->msc_ld, LDAP_OPT_REFERRALS,
 		META_BACK_TGT_CHASE_REFERRALS( mt ) ? LDAP_OPT_ON : LDAP_OPT_OFF );
 
+	slap_client_keepalive(msc->msc_ld, &mt->mt_tls.sb_keepalive);
+
 #ifdef HAVE_TLS
 	if ( !is_ldaps ) {
 		slap_bindconf *sb = NULL;
@@ -762,6 +764,7 @@ meta_back_retry(
 
 		if ( rc == LDAP_SUCCESS ) {
 			quarantine = 0;
+			LDAP_BACK_CONN_BINDING_SET( msc ); binding = 1;
 			rc = meta_back_single_dobind( op, rs, mcp, candidate,
 				sendok, mt->mt_nretries, 0 );
 
@@ -784,10 +787,12 @@ meta_back_retry(
 					LDAP_BACK_CONN_BINDING_CLEAR( msc );
 				}
 			}
-        	}
+		}
 
+#if 0	/* ITS#7591, following stmt drops needed result msgs */
 		/* don't send twice */
 		sendok &= ~LDAP_BACK_SENDERR;
+#endif
 	}
 
 	if ( rc != LDAP_SUCCESS ) {
@@ -1179,8 +1184,8 @@ retry_lock:;
 				mc = NULL;
 
 			} else {
-				if ( ( mi->mi_conn_ttl != 0 && op->o_time > mc->mc_create_time + mi->mi_conn_ttl )
-					|| ( mi->mi_idle_timeout != 0 && op->o_time > mc->mc_time + mi->mi_idle_timeout ) )
+				if ( mc->mc_refcnt == 0 && (( mi->mi_conn_ttl != 0 && op->o_time > mc->mc_create_time + mi->mi_conn_ttl )
+					|| ( mi->mi_idle_timeout != 0 && op->o_time > mc->mc_time + mi->mi_idle_timeout )) )
 				{
 #if META_BACK_PRINT_CONNTREE > 0
 					meta_back_print_conntree( mi,

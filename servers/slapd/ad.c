@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -844,6 +844,9 @@ undef_promote(
 			tmp->ad_next = NULL;
 			/* ad_cname was contiguous, no leak here */
 			tmp->ad_cname = nat->sat_cname;
+			ldap_pvt_thread_mutex_lock( &ad_index_mutex );
+			tmp->ad_index = ++ad_count;
+			ldap_pvt_thread_mutex_unlock( &ad_index_mutex );
 			*n_ad = tmp;
 			n_ad = &tmp->ad_next;
 		} else {

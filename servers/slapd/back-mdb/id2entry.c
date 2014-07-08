@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2000-2012 The OpenLDAP Foundation.
+ * Copyright 2000-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -72,7 +72,7 @@ again:
 	if (rc == MDB_SUCCESS) {
 		rc = mdb_entry_encode( op, e, &data, &ec );
 		if( rc != LDAP_SUCCESS )
-			return LDAP_OTHER;
+			return rc;
 	}
 	if (rc) {
 		/* Was there a hole from slapadd? */
@@ -121,12 +121,17 @@ int mdb_id2edata(
 	MDB_val *data )
 {
 	MDB_val key;
+	int rc;
 
 	key.mv_data = &id;
 	key.mv_size = sizeof(ID);
 
 	/* fetch it */
-	return mdb_cursor_get( mc, &key, data, MDB_SET );
+	rc = mdb_cursor_get( mc, &key, data, MDB_SET );
+	/* stubs from missing parents - DB is actually invalid */
+	if ( rc == MDB_SUCCESS && !data->mv_size )
+		rc = MDB_NOTFOUND;
+	return rc;
 }
 
 int mdb_id2entry(
@@ -178,9 +183,12 @@ int mdb_id2entry(
 			return MDB_SUCCESS;
 		}
 	}
+	/* stubs from missing parents - DB is actually invalid */
+	if ( rc == MDB_SUCCESS && !data.mv_size )
+		rc = MDB_NOTFOUND;
 	if ( rc ) return rc;
 
-	rc = mdb_entry_decode( op, &data, e );
+	rc = mdb_entry_decode( op, mdb_cursor_txn( mc ), &data, e );
 	if ( rc ) return rc;
 
 	(*e)->e_id = id;
@@ -234,6 +242,8 @@ int mdb_entry_return(
 	Entry *e
 )
 {
+	if ( !e )
+		return 0;
 	if ( e->e_private ) {
 		if ( op->o_hdr ) {
 			op->o_tmpfree( e->e_nname.bv_val, op->o_tmpmemctx );
@@ -263,7 +273,7 @@ int mdb_entry_release(
 			SLAP_TRUNCATE_MODE, SLAP_UNDEFINED_MODE */
  
 	mdb_entry_return( op, e );
-	if ( slapMode == SLAP_SERVER_MODE ) {
+	if ( slapMode & SLAP_SERVER_MODE ) {
 		OpExtra *oex;
 		LDAP_SLIST_FOREACH( oex, &op->o_extra, oe_next ) {
 			if ( oex->oe_key == mdb ) {
@@ -315,7 +325,7 @@ int mdb_entry_get(
 	txn = moi->moi_txn;
 
 	/* can we find entry */
-	rc = mdb_dn2entry( op, txn, NULL, ndn, &e, 0 );
+	rc = mdb_dn2entry( op, txn, NULL, ndn, &e, NULL, 0 );
 	switch( rc ) {
 	case MDB_NOTFOUND:
 	case 0:
@@ -355,14 +365,7 @@ int mdb_entry_get(
 return_results:
 	if( rc != LDAP_SUCCESS ) {
 		/* free entry */
-		if ( e )
-			mdb_entry_return( op, e );
-
-		if (moi->moi_ref == 1) {
-			LDAP_SLIST_REMOVE( &op->o_extra, &moi->moi_oe, OpExtra, oe_next );
-			mdb_txn_reset( txn );
-			op->o_tmpfree( moi, op->o_tmpmemctx );
-		}
+		mdb_entry_release( op, e, rw );
 	} else {
 		*ent = e;
 	}
@@ -497,7 +500,8 @@ mdb_opinfo_get( Operation *op, struct mdb_info *mdb, int rdonly, mdb_op_info **m
 		moi->moi_ref = 0;
 	}
 	if ( renew ) {
-		mdb_txn_renew( moi->moi_txn );
+		rc = mdb_txn_renew( moi->moi_txn );
+		assert(!rc);
 	}
 	moi->moi_ref++;
 	if ( *moip != moi )
@@ -592,6 +596,8 @@ static int mdb_entry_encode(Operation *op, Entry *e, MDB_val *data, Ecount *eh)
 	ptr = (unsigned char *)(lp + eh->offset);
 
 	for (a=e->e_attrs; a; a=a->a_next) {
+		if (!a->a_desc->ad_index)
+			return LDAP_UNDEFINED_TYPE;
 		*lp++ = mdb->mi_adxs[a->a_desc->ad_index];
 		l = a->a_numvals;
 		if (a->a_nvals != a->a_vals)
@@ -632,7 +638,7 @@ static int mdb_entry_encode(Operation *op, Entry *e, MDB_val *data, Ecount *eh)
  * structure. Attempting to do so will likely corrupt memory.
  */
 
-int mdb_entry_decode(Operation *op, MDB_val *data, Entry **e)
+int mdb_entry_decode(Operation *op, MDB_txn *txn, MDB_val *data, Entry **e)
 {
 	struct mdb_info *mdb = (struct mdb_info *) op->o_bd->be_private;
 	int i, j, nattrs, nvals;
@@ -663,7 +669,19 @@ int mdb_entry_decode(Operation *op, MDB_val *data, Entry **e)
 
 	for (;nattrs>0; nattrs--) {
 		int have_nval = 0;
-		a->a_desc = mdb->mi_ads[*lp++];
+		i = *lp++;
+		if (i > mdb->mi_numads) {
+			rc = mdb_ad_read(mdb, txn);
+			if (rc)
+				return rc;
+			if (i > mdb->mi_numads) {
+				Debug( LDAP_DEBUG_ANY,
+					"mdb_entry_decode: attribute index %d not recognized\n",
+					i, 0, 0 );
+				return LDAP_OTHER;
+			}
+		}
+		a->a_desc = mdb->mi_ads[i];
 		a->a_flags = SLAP_ATTR_DONT_FREE_DATA | SLAP_ATTR_DONT_FREE_VALS;
 		a->a_numvals = *lp++;
 		if (a->a_numvals & HIGH_BIT) {

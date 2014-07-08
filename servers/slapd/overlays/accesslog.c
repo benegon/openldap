@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2005-2012 The OpenLDAP Foundation.
+ * Copyright 2005-2014 The OpenLDAP Foundation.
  * Portions copyright 2004-2005 Symas Corporation.
  * All rights reserved.
  *
@@ -2348,9 +2348,6 @@ int accesslog_initialize()
 				0, 0, 0 );
 			return -1;
 		}
-#ifndef LDAP_DEVEL
-		(*lattrs[i].ad)->ad_type->sat_flags |= SLAP_AT_HIDE;
-#endif
 	}
 
 	for ( i=0; locs[i].ot; i++ ) {
@@ -2363,9 +2360,6 @@ int accesslog_initialize()
 				0, 0, 0 );
 			return -1;
 		}
-#ifndef LDAP_DEVEL
-		(*locs[i].oc)->soc_flags |= SLAP_OC_HIDE;
-#endif
 	}
 
 	return overlay_register(&accesslog);

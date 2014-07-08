@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -209,7 +209,7 @@ start_again:;
 			LDAP_NEXT_MSGID(ld, i);
 #ifdef LDAP_CONNECTIONLESS
 			if ( LDAP_IS_UDP(ld) ) {
-				struct sockaddr sa = {0};
+				struct sockaddr_storage sa = {0};
 				/* dummy, filled with ldo_peer in request.c */
 				err = ber_write( ber, (char *) &sa, sizeof(sa), 0 );
 			}
@@ -279,9 +279,14 @@ start_again:;
 
 	if ( lr != NULL ) {
 		if ( sendabandon || lr->lr_status == LDAP_REQST_WRITING ) {
+			/* release ld_req_mutex while grabbing ld_conn_mutex to
+			 * prevent deadlock.
+			 */
+			LDAP_MUTEX_UNLOCK( &ld->ld_req_mutex );
 			LDAP_MUTEX_LOCK( &ld->ld_conn_mutex );
 			ldap_free_connection( ld, lr->lr_conn, 0, 1 );
 			LDAP_MUTEX_UNLOCK( &ld->ld_conn_mutex );
+			LDAP_MUTEX_LOCK( &ld->ld_req_mutex );
 		}
 
 		if ( origid == msgid ) {

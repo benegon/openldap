@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2000-2012 The OpenLDAP Foundation.
+ * Copyright 2000-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -59,6 +59,7 @@ static ConfigTable mdbcfg[] = {
 	{ "envflags", "flags", 2, 0, 0, ARG_MAGIC|MDB_ENVFLAGS,
 		mdb_cf_gen, "( OLcfgDbAt:12.3 NAME 'olcDbEnvFlags' "
 			"DESC 'Database environment flags' "
+			"EQUALITY caseIgnoreMatch "
 			"SYNTAX OMsDirectoryString )", NULL, NULL },
 	{ "index", "attr> <[pres,eq,approx,sub]", 2, 3, 0, ARG_MAGIC|MDB_INDEX,
 		mdb_cf_gen, "( OLcfgDbAt:0.2 NAME 'olcDbIndex' "
@@ -104,6 +105,7 @@ static slap_verbmasks mdb_envflags[] = {
 	{ BER_BVC("nometasync"),	MDB_NOMETASYNC },
 	{ BER_BVC("writemap"),	MDB_WRITEMAP },
 	{ BER_BVC("mapasync"),	MDB_MAPASYNC },
+	{ BER_BVC("nordahead"),	MDB_NORDAHEAD },
 	{ BER_BVNULL, 0 }
 };
 
@@ -114,7 +116,7 @@ mdb_checkpoint( void *ctx, void *arg )
 	struct re_s *rtask = arg;
 	struct mdb_info *mdb = rtask->arg;
 
-	mdb_env_sync( mdb->mi_dbenv, 0 );
+	mdb_env_sync( mdb->mi_dbenv, 1 );
 	ldap_pvt_thread_mutex_lock( &slapd_rq.rq_mutex );
 	ldap_pvt_runqueue_stoptask( &slapd_rq, rtask );
 	ldap_pvt_thread_mutex_unlock( &slapd_rq.rq_mutex );
@@ -194,8 +196,13 @@ mdb_online_index( void *ctx, void *arg )
 			mdb_txn_abort( txn );
 			txn = NULL;
 		}
-		if ( rc )
+		if ( rc ) {
+			Debug( LDAP_DEBUG_ANY,
+				LDAP_XSTRING(mdb_online_index) ": database %s: "
+				"txn_commit failed: %s (%d)\n",
+				be->be_suffix[0].bv_val, mdb_strerror(rc), rc );
 			break;
+		}
 		id++;
 		getnext = 1;
 	}

@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -132,7 +132,21 @@ slap_req2res( ber_tag_t tag )
 	return tag;
 }
 
-/* SlapReply debugging, prodo-slap.h overrides it in OpenLDAP releases */
+/*
+ * SlapReply debugging enabled by USE_RS_ASSERT.
+ *
+ * Disabled by default, but compiled in (but still unused) when
+ * LDAP_TEST.  #define USE_RS_ASSERT as nonzero to enable some
+ * assertions which check the SlapReply.  USE_RS_ASSERT = 2 or higher
+ * check aggressively, currently some code fail these tests.
+ *
+ * Environment variable $NO_RS_ASSERT controls how USE_RS_ASSERT handles
+ * errors.  > 0: ignore errors, 0: abort (the default), < 0: just warn.
+ *
+ * Wrap LDAP operation calls in macros SLAP_OP() & co from proto-slap.h
+ * to check the SlapReply.  contrib/slapd-tools/wrap_slap_ops converts
+ * source code to use the macros.
+ */
 #if defined(LDAP_TEST) || (defined(USE_RS_ASSERT) && (USE_RS_ASSERT))
 
 int rs_suppress_assert = 0;
@@ -286,6 +300,7 @@ static long send_ldap_ber(
 	Connection *conn = op->o_conn;
 	ber_len_t bytes;
 	long ret = 0;
+	char *close_reason;
 
 	ber_get_option( ber, LBER_OPT_BER_BYTES_TO_WRITE, &bytes );
 
@@ -300,7 +315,9 @@ static long send_ldap_ber(
 	conn->c_writers++;
 
 	while ( conn->c_writers > 0 && conn->c_writing ) {
+		ldap_pvt_thread_pool_idle( &connection_pool );
 		ldap_pvt_thread_cond_wait( &conn->c_write1_cv, &conn->c_write1_mutex );
+		ldap_pvt_thread_pool_unidle( &connection_pool );
 	}
 
 	/* connection was closed under us */
@@ -320,23 +337,7 @@ static long send_ldap_ber(
 	while( 1 ) {
 		int err;
 
-		/* lock the connection */ 
-		if ( ldap_pvt_thread_mutex_trylock( &conn->c_mutex )) {
-			if ( !connection_valid(conn)) {
-				ret = 0;
-				break;
-			}
-			ldap_pvt_thread_mutex_unlock( &conn->c_write1_mutex );
-			ldap_pvt_thread_mutex_lock( &conn->c_write1_mutex );
-			if ( conn->c_writers < 0 ) {
-				ret = 0;
-				break;
-			}
-			continue;
-		}
-
 		if ( ber_flush2( conn->c_sb, ber, LBER_FLUSH_FREE_NEVER ) == 0 ) {
-			ldap_pvt_thread_mutex_unlock( &conn->c_mutex );
 			ret = bytes;
 			break;
 		}
@@ -353,28 +354,36 @@ static long send_ldap_ber(
 		    err, sock_errstr(err), 0 );
 
 		if ( err != EWOULDBLOCK && err != EAGAIN ) {
+			close_reason = "connection lost on write";
+fail:
 			conn->c_writers--;
 			conn->c_writing = 0;
 			ldap_pvt_thread_mutex_unlock( &conn->c_write1_mutex );
-			connection_closing( conn, "connection lost on write" );
-
+			ldap_pvt_thread_mutex_lock( &conn->c_mutex );
+			connection_closing( conn, close_reason );
 			ldap_pvt_thread_mutex_unlock( &conn->c_mutex );
 			return -1;
 		}
 
 		/* wait for socket to be write-ready */
-		ldap_pvt_thread_mutex_lock( &conn->c_write2_mutex );
 		conn->c_writewaiter = 1;
-		slapd_set_write( conn->c_sd, 2 );
-
 		ldap_pvt_thread_mutex_unlock( &conn->c_write1_mutex );
-		ldap_pvt_thread_mutex_unlock( &conn->c_mutex );
 		ldap_pvt_thread_pool_idle( &connection_pool );
-		ldap_pvt_thread_cond_wait( &conn->c_write2_cv, &conn->c_write2_mutex );
+		err = slapd_wait_writer( conn->c_sd );
 		conn->c_writewaiter = 0;
-		ldap_pvt_thread_mutex_unlock( &conn->c_write2_mutex );
 		ldap_pvt_thread_pool_unidle( &connection_pool );
 		ldap_pvt_thread_mutex_lock( &conn->c_write1_mutex );
+		/* 0 is timeout, so we close it.
+		 * -1 is an error, close it.
+		 */
+		if ( err <= 0 ) {
+			if ( err == 0 )
+				close_reason = "writetimeout";
+			else
+				close_reason = "connection lost on writewait";
+			goto fail;
+		}
+
 		if ( conn->c_writers < 0 ) {
 			ret = 0;
 			break;

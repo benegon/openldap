@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,10 +39,6 @@
 
 #ifndef INT_MAX
 #define	INT_MAX	2147483647	/* 32 bit signed max */
-#endif
-
-#ifdef LDAP_R_COMPILE
-ldap_pvt_thread_mutex_t ldap_int_sasl_mutex;
 #endif
 
 #ifdef HAVE_SASL_SASL_H
@@ -373,6 +369,10 @@ int ldap_int_sasl_close( LDAP *ld, LDAPConn *lc )
 		lc->lconn_sasl_sockctx = NULL;
 		lc->lconn_sasl_authctx = NULL;
 	}
+	if( lc->lconn_sasl_cbind ) {
+		ldap_memfree( lc->lconn_sasl_cbind );
+		lc->lconn_sasl_cbind = NULL;
+	}
 
 	return LDAP_SUCCESS;
 }
@@ -486,6 +486,24 @@ ldap_int_sasl_bind(
 
 			(void) ldap_int_sasl_external( ld, ld->ld_defconn, authid.bv_val, fac );
 			LDAP_FREE( authid.bv_val );
+#ifdef SASL_CHANNEL_BINDING	/* 2.1.25+ */
+			{
+				char cbinding[64];
+				struct berval cbv = { sizeof(cbinding), cbinding };
+				if ( ldap_pvt_tls_get_unique( ssl, &cbv, 0 )) {
+					sasl_channel_binding_t *cb = ldap_memalloc( sizeof(*cb) +
+						cbv.bv_len);
+					cb->name = "ldap";
+					cb->critical = 0;
+					cb->data = (char *)(cb+1);
+					cb->len = cbv.bv_len;
+					memcpy( cb->data, cbv.bv_val, cbv.bv_len );
+					sasl_setprop( ld->ld_defconn->lconn_sasl_authctx,
+						SASL_CHANNEL_BINDING, cb );
+					ld->ld_defconn->lconn_sasl_cbind = cb;
+				}
+			}
+#endif
 		}
 #endif
 
@@ -549,8 +567,11 @@ ldap_int_sasl_bind(
 		ctx = ld->ld_defconn->lconn_sasl_authctx;
 
 		rc = ldap_parse_sasl_bind_result( ld, result, &scred, 0 );
-		if ( rc != LDAP_SUCCESS )
+		if ( rc != LDAP_SUCCESS ) {
+			if ( scred )
+				ber_bvfree( scred );
 			goto done;
+		}
 
 		rc = ldap_result2error( ld, result, 0 );
 		if ( rc != LDAP_SUCCESS && rc != LDAP_SASL_BIND_IN_PROGRESS ) {
@@ -566,8 +587,11 @@ ldap_int_sasl_bind(
 		}
 
 		mech = *rmech;
-		if ( rc == LDAP_SUCCESS && mech == NULL )
+		if ( rc == LDAP_SUCCESS && mech == NULL ) {
+			if ( scred )
+				ber_bvfree( scred );
 			goto success;
+		}
 
 		do {
 			if( ! scred ) {

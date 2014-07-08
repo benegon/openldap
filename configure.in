@@ -1,7 +1,7 @@
 dnl $OpenLDAP$
 dnl This work is part of OpenLDAP Software <http://www.openldap.org/>.
 dnl
-dnl Copyright 1998-2012 The OpenLDAP Foundation.
+dnl Copyright 1998-2014 The OpenLDAP Foundation.
 dnl All rights reserved.
 dnl
 dnl Redistribution and use in source and binary forms, with or without
@@ -23,7 +23,7 @@ define([AC_LIBTOOL_LANG_F77_CONFIG], [:])dnl
 define([AC_LIBTOOL_LANG_GCJ_CONFIG], [:])dnl
 dnl ================================================================
 dnl Configure.in for OpenLDAP
-AC_COPYRIGHT([[Copyright 1998-2012 The OpenLDAP Foundation. All rights reserved.
+AC_COPYRIGHT([[Copyright 1998-2014 The OpenLDAP Foundation. All rights reserved.
 Restrictions apply, see COPYRIGHT and LICENSE files.]])
 AC_REVISION([$Id$])
 AC_INIT([OpenLDAP],,[http://www.openldap.org/its/])
@@ -98,7 +98,7 @@ AH_TOP([
 /* begin of portable.h.pre */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation
+ * Copyright 1998-2014 The OpenLDAP Foundation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -308,7 +308,7 @@ OL_ARG_ENABLE(bdb,[    --enable-bdb	  enable Berkeley DB backend],
 OL_ARG_ENABLE(dnssrv,[    --enable-dnssrv	  enable dnssrv backend],
 	no, [no yes mod], ol_enable_backends)dnl
 OL_ARG_ENABLE(hdb,[    --enable-hdb	  enable Hierarchical DB backend],
-	yes, [no yes mod], ol_enable_backends)dnl
+	no, [no yes mod], ol_enable_backends)dnl
 OL_ARG_ENABLE(ldap,[    --enable-ldap	  enable ldap backend],
 	no, [no yes mod], ol_enable_backends)dnl
 OL_ARG_ENABLE(mdb,[    --enable-mdb	  enable mdb database backend],
@@ -1207,6 +1207,13 @@ if test $ol_link_tls = no ; then
 		AC_CHECK_HEADERS(gnutls/gnutls.h)
 
 		if test $ac_cv_header_gnutls_gnutls_h = yes ; then
+			AC_PREPROC_IFELSE(
+				[[#include <gnutls/gnutls.h>]
+[#if GNUTLS_VERSION_NUMBER < 0x020c00]
+[#error "GnuTLS 2.12.0 or newer required"]
+[#endif]],
+					, [AC_MSG_FAILURE([GnuTLS is too old])])
+
 			AC_CHECK_LIB(gnutls, gnutls_init,
 				[have_gnutls=yes], [have_gnutls=no])
 
@@ -1972,7 +1979,7 @@ if test $ol_enable_sql != no ; then
 	])
 
 	sql_LIBS="$LIBS"
-	LIBS="$LTHREAD_LIBS"
+	LIBS="$LTHREAD_LIBS $LIBS"
 
 	if test $ol_with_odbc = auto ; then
 		ol_with_odbc="iodbc unixodbc odbc32"
@@ -3222,7 +3229,7 @@ rm -f $BACKENDSC
 cat > $BACKENDSC << ENDX
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -3273,7 +3280,7 @@ rm -f $OVERLAYSC
 cat > $OVERLAYSC << ENDX
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without

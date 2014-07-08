@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2008-2012 The OpenLDAP Foundation.
+ * Copyright 2008-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -912,6 +912,7 @@ tlsm_get_pin(PK11SlotInfo *slot, PRBool retry, tlsm_ctx *ctx)
 		int infd = PR_FileDesc2NativeHandle( PR_STDIN );
 		int isTTY = isatty( infd );
 		unsigned char phrase[200];
+		char *dummy;
 		/* Prompt for password */
 		if ( isTTY ) {
 			fprintf( stdout,
@@ -919,7 +920,8 @@ tlsm_get_pin(PK11SlotInfo *slot, PRBool retry, tlsm_ctx *ctx)
 				 token_name ? token_name : DEFAULT_TOKEN_NAME );
 			echoOff( infd );
 		}
-		fgets( (char*)phrase, sizeof(phrase), stdin );
+		dummy = fgets( (char*)phrase, sizeof(phrase), stdin );
+		(void) dummy;
 		if ( isTTY ) {
 			fprintf( stdout, "\n" );
 			echoOn( infd );
@@ -2064,8 +2066,10 @@ tlsm_ctx_free ( tls_ctx *ctx )
 				   errcode, PR_ErrorToString( errcode, PR_LANGUAGE_I_DEFAULT ), 0 );
 		}
 	}
-	PL_strfree( c->tc_pin_file );
-	c->tc_pin_file = NULL;
+	if ( c->tc_pin_file ) {
+		PL_strfree( c->tc_pin_file );
+		c->tc_pin_file = NULL;
+	}
 	tlsm_free_pem_objs( c );
 #ifdef HAVE_NSS_INITCONTEXT
 	if ( c->tc_initctx ) {
@@ -2315,7 +2319,8 @@ tlsm_deferred_ctx_init( void *arg )
 				return rc;
 			}
 		} else {
-			PL_strfree( ctx->tc_pin_file );
+			if ( ctx->tc_pin_file )
+				PL_strfree( ctx->tc_pin_file );
 			ctx->tc_pin_file = PL_strdup( lt->lt_keyfile );
 		}
 	}
@@ -2838,6 +2843,73 @@ tlsm_session_strength( tls_session *session )
 	return rc ? 0 : keySize;
 }
 
+static int
+tlsm_session_unique( tls_session *sess, struct berval *buf, int is_server)
+{
+	/* Need upstream support https://bugzilla.mozilla.org/show_bug.cgi?id=563276 */
+	return 0;
+}
+
+/* Yet again, we're pasting in glue that MozNSS ought to provide itself. */
+static struct {
+	const char *name;
+	int num;
+} pvers[] = {
+	{ "SSLv2", SSL_LIBRARY_VERSION_2 },
+	{ "SSLv3", SSL_LIBRARY_VERSION_3_0 },
+	{ "TLSv1", SSL_LIBRARY_VERSION_TLS_1_0 },
+	{ "TLSv1.1", SSL_LIBRARY_VERSION_TLS_1_1 },
+	{ NULL, 0 }
+};
+
+static const char *
+tlsm_session_version( tls_session *sess )
+{
+	tlsm_session *s = (tlsm_session *)sess;
+	SSLChannelInfo info;
+	int rc;
+	rc = SSL_GetChannelInfo( s, &info, sizeof( info ));
+	if ( rc == 0 ) {
+		int i;
+		for (i=0; pvers[i].name; i++)
+			if (pvers[i].num == info.protocolVersion)
+				return pvers[i].name;
+	}
+	return "unknown";
+}
+
+static const char *
+tlsm_session_cipher( tls_session *sess )
+{
+	tlsm_session *s = (tlsm_session *)sess;
+	SSLChannelInfo info;
+	int rc;
+	rc = SSL_GetChannelInfo( s, &info, sizeof( info ));
+	if ( rc == 0 ) {
+		SSLCipherSuiteInfo csinfo;
+		rc = SSL_GetCipherSuiteInfo( info.cipherSuite, &csinfo, sizeof( csinfo ));
+		if ( rc == 0 )
+			return csinfo.cipherSuiteName;
+	}
+	return "unknown";
+}
+
+static int
+tlsm_session_peercert( tls_session *sess, struct berval *der )
+{
+	tlsm_session *s = (tlsm_session *)sess;
+	CERTCertificate *cert;
+	cert = SSL_PeerCertificate( s );
+	if (!cert)
+		return -1;
+	der->bv_len = cert->derCert.len;
+	der->bv_val = LDAP_MALLOC( der->bv_len );
+	if (!der->bv_val)
+		return -1;
+	memcpy( der->bv_val, cert->derCert.data, der->bv_len );
+	return 0;
+}
+
 /*
  * TLS support for LBER Sockbufs
  */
@@ -3266,6 +3338,10 @@ tls_impl ldap_int_tls_impl = {
 	tlsm_session_peer_dn,
 	tlsm_session_chkhost,
 	tlsm_session_strength,
+	tlsm_session_unique,
+	tlsm_session_version,
+	tlsm_session_cipher,
+	tlsm_session_peercert,
 
 	&tlsm_sbio,
 

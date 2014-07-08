@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -486,8 +486,8 @@ ldif_must_b64_encode( LDAP_CONST char *s )
 	return 0;
 }
 
-/* compatibility with U-Mich off by one bug */
-#define LDIF_KLUDGE 1
+/* compatibility with U-Mich off by two bug */
+#define LDIF_KLUDGE 2
 
 /* NOTE: only preserved for binary compatibility */
 void
@@ -498,7 +498,7 @@ ldif_sput(
 	LDAP_CONST char *val,
 	ber_len_t vlen )
 {
-	ldif_sput_wrap( out, type, name, val, vlen, LDIF_LINE_WIDTH );
+	ldif_sput_wrap( out, type, name, val, vlen, LDIF_LINE_WIDTH+LDIF_KLUDGE );
 }
 
 void
@@ -521,7 +521,8 @@ ldif_sput_wrap(
 	ber_len_t len=0;
 	ber_len_t i;
 
-	wrap = LDIF_LINE_WIDTH_WRAP( wrap );
+	if ( !wrap )
+		wrap = LDIF_LINE_WIDTH+LDIF_KLUDGE;
 
 	/* prefix */
 	switch( type ) {
@@ -633,7 +634,7 @@ ldif_sput_wrap(
 				b64 = 1;
 				break;
 			}
-			if ( len - LDIF_KLUDGE > wrap ) {
+			if ( len >= wrap ) {
 				*(*out)++ = '\n';
 				*(*out)++ = ' ';
 				len = 1;
@@ -662,7 +663,7 @@ ldif_sput_wrap(
 		bits |= (byte[2] & 0xff);
 
 		for ( i = 0; i < 4; i++, len++, bits <<= 6 ) {
-			if ( len - LDIF_KLUDGE > wrap ) {
+			if ( len >= wrap ) {
 				*(*out)++ = '\n';
 				*(*out)++ = ' ';
 				len = 1;
@@ -687,7 +688,7 @@ ldif_sput_wrap(
 		bits |= (byte[2] & 0xff);
 
 		for ( i = 0; i < 4; i++, len++, bits <<= 6 ) {
-			if ( len - LDIF_KLUDGE > wrap ) {
+			if ( len >= wrap ) {
 				*(*out)++ = '\n';
 				*(*out)++ = ' ';
 				len = 1;
@@ -814,11 +815,11 @@ ldif_close(
 int
 ldif_read_record(
 	LDIFFP      *lfp,
-	int         *lno,		/* ptr to line number counter              */
+	unsigned long *lno,		/* ptr to line number counter              */
 	char        **bufp,     /* ptr to malloced output buffer           */
 	int         *buflenp )  /* ptr to length of *bufp                  */
 {
-	char        line[LDIF_MAXLINE], *nbufp;
+	char        line[LDIF_MAXLINE+2], *nbufp;
 	ber_len_t   lcur = 0, len;
 	int         last_ch = '\n', found_entry = 0, stop, top_comment = 0;
 
@@ -853,11 +854,16 @@ ldif_read_record(
 			line[++len] = '\0';
 		}
 
+		/* Squash \r\n to \n */
+		if ( len > 1 && line[len-2] == '\r' ) {
+			len--;
+			line[len-1] = '\n';
+		}
+
 		if ( last_ch == '\n' ) {
 			(*lno)++;
 
-			if ( line[0] == '\n' ||
-				( line[0] == '\r' && line[1] == '\n' )) {
+			if ( line[0] == '\n' ) {
 				if ( !found_entry ) {
 					lcur = 0;
 					top_comment = 0;
@@ -884,10 +890,6 @@ ldif_read_record(
 						found_entry = 0;
 
 						if ( line[len-1] == '\n' ) {
-							len--;
-							line[len] = '\0';
-						}
-						if ( line[len-1] == '\r' ) {
 							len--;
 							line[len] = '\0';
 						}

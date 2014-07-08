@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>. 
  *
- * Copyright 2008-2012 The OpenLDAP Foundation.
+ * Copyright 2008-2014 The OpenLDAP Foundation.
  * Portions Copyright 2008-2009 by Howard Chu, Symas Corp.
  * All rights reserved.
  *
@@ -143,7 +143,7 @@ static int write_group(nssov_group_cbp *cbp,Entry *entry)
 	struct berval *names,*gids,*members;
 	struct berval passwd = {0};
 	Attribute *a;
-	int i,j,nummembers,rc;
+	int i,j,nummembers,rc = 0;
 
 	/* get group name (cn) */
 	if (BER_BVISNULL(&cbp->name))

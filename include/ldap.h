@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  * 
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -158,6 +158,10 @@ LDAP_BEGIN_DECL
 #define LDAP_OPT_X_TLS_NEWCTX		0x600f
 #define LDAP_OPT_X_TLS_CRLFILE		0x6010	/* GNUtls only */
 #define LDAP_OPT_X_TLS_PACKAGE		0x6011
+#define LDAP_OPT_X_TLS_ECNAME		0x6012
+#define LDAP_OPT_X_TLS_VERSION		0x6013	/* read-only */
+#define LDAP_OPT_X_TLS_CIPHER		0x6014	/* read-only */
+#define LDAP_OPT_X_TLS_PEERCERT		0x6015	/* read-only */
 
 #define LDAP_OPT_X_TLS_NEVER	0
 #define LDAP_OPT_X_TLS_HARD		1
@@ -418,13 +422,11 @@ typedef struct ldapcontrol {
 #define LDAP_URLEXT_X_SEARCHEDSUBTREE	"x-searchedSubtree"
 #define LDAP_URLEXT_X_FAILEDNAME	"x-failedName"
 
-#ifdef LDAP_DEVEL
 #define LDAP_X_TXN						"1.3.6.1.4.1.4203.666.11.7" /* tmp */
 #define LDAP_EXOP_X_TXN_START			LDAP_X_TXN ".1"
 #define LDAP_CONTROL_X_TXN_SPEC			LDAP_X_TXN ".2"
 #define LDAP_EXOP_X_TXN_END				LDAP_X_TXN ".3"
 #define LDAP_EXOP_X_TXN_ABORTED_NOTICE	LDAP_X_TXN ".4"
-#endif
 
 /* LDAP Features */
 #define LDAP_FEATURE_ALL_OP_ATTRS	"1.3.6.1.4.1.4203.1.5.1"	/* RFC 3673 */
@@ -2663,7 +2665,7 @@ ldap_ldif_record_done LDAP_P((
 LDAP_F( int )
 ldap_parse_ldif_record LDAP_P((
 	struct berval *rbuf,
-	int linenum,
+	unsigned long linenum,
 	LDIFRecord *lr,
 	const char *errstr,
 	unsigned int flags ));

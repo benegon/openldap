@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1999-2012 The OpenLDAP Foundation.
+ * Copyright 1999-2014 The OpenLDAP Foundation.
  * Portions Copyright 2001-2003 Pierangelo Masarati.
  * Portions Copyright 1999-2003 Howard Chu.
  * All rights reserved.
@@ -543,6 +543,20 @@ meta_back_search_start(
 			/*
 			 * this target is no longer candidate
 			 */
+			retcode = META_SEARCH_NOT_CANDIDATE;
+			goto doreturn;
+		}
+	}
+
+	/* check filter expression */
+	if ( mt->mt_filter ) {
+		metafilter_t *mf;
+		for ( mf = mt->mt_filter; mf; mf = mf->mf_next ) {
+			if ( regexec( &mf->mf_regex, op->ors_filterstr.bv_val, 0, NULL, 0 ) == 0 )
+				break;
+		}
+		/* nothing matched, this target is no longer a candidate */
+		if ( !mf ) {
 			retcode = META_SEARCH_NOT_CANDIDATE;
 			goto doreturn;
 		}

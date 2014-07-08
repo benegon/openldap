@@ -23,7 +23,7 @@ ddd
 DAs
 TLSCACertificateFile
 BNF
-TLSEphemeralDHParamFile
+TLSDHParamFile
 ppolicy
 gavin
 ASN
@@ -1688,3 +1688,5 @@ uidNumber
 CA's
 CAs
 namingContext
+mdb
+lmdb

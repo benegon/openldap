@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2007-2012 The OpenLDAP Foundation.
+ * Copyright 2007-2014 The OpenLDAP Foundation.
  * Portions Copyright 2007 Michał Szulczyński.
  * Portions Copyright 2009 Howard Chu.
  * All rights reserved.
@@ -331,6 +331,7 @@ autogroup_member_search_cb( Operation *op, SlapReply *rs )
 		const char		*text = NULL;
 		char			textbuf[1024];
 		struct berval		*vals, *nvals;
+		struct berval		lvals[ 2 ], lnvals[ 2 ];
 		int			numvals;
 
 		Debug(LDAP_DEBUG_TRACE, "==> autogroup_member_search_cb <%s>\n",
@@ -347,7 +348,6 @@ autogroup_member_search_cb( Operation *op, SlapReply *rs )
 				return 0;
 			}
 		} else {
-			struct berval		lvals[ 2 ], lnvals[ 2 ];
 			lvals[ 0 ] = rs->sr_entry->e_name;
 			BER_BVZERO( &lvals[ 1 ] );
 			lnvals[ 0 ] = rs->sr_entry->e_nname;
@@ -387,6 +387,7 @@ autogroup_member_search_modify_cb( Operation *op, SlapReply *rs )
 		autogroup_filter_t	*agf = agg->agg_filter;
 		Modifications		*modlist;
 		struct berval		*vals, *nvals;
+		struct berval		lvals[ 2 ], lnvals[ 2 ];
 		int			numvals;
 
 		Debug(LDAP_DEBUG_TRACE, "==> autogroup_member_search_modify_cb <%s>\n",
@@ -403,7 +404,6 @@ autogroup_member_search_modify_cb( Operation *op, SlapReply *rs )
 				return 0;
 			}
 		} else {
-			struct berval		lvals[ 2 ], lnvals[ 2 ];
 			lvals[ 0 ] = rs->sr_entry->e_name;
 			BER_BVZERO( &lvals[ 1 ] );
 			lnvals[ 0 ] = rs->sr_entry->e_nname;
@@ -1212,7 +1212,6 @@ autogroup_response( Operation *op, SlapReply *rs )
 
 									autogroup_add_group( op, agi, group_agd, NULL, &op->o_req_ndn, 1, 1);
 
-									overlay_entry_release_ov( op, e, 0, on );
 									ldap_pvt_thread_mutex_unlock( &agi->agi_mutex );
 									return SLAP_CB_CONTINUE;
 								}

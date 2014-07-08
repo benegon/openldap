@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -154,9 +154,7 @@ int connections_destroy(void)
 			ber_sockbuf_free( connections[i].c_sb );
 			ldap_pvt_thread_mutex_destroy( &connections[i].c_mutex );
 			ldap_pvt_thread_mutex_destroy( &connections[i].c_write1_mutex );
-			ldap_pvt_thread_mutex_destroy( &connections[i].c_write2_mutex );
 			ldap_pvt_thread_cond_destroy( &connections[i].c_write1_cv );
-			ldap_pvt_thread_cond_destroy( &connections[i].c_write2_cv );
 #ifdef LDAP_SLAPI
 			if ( slapi_plugins_used ) {
 				slapi_int_free_object_extensions( SLAPI_X_EXT_CONNECTION,
@@ -211,17 +209,13 @@ int connections_timeout_idle(time_t now)
 	int i = 0, writers = 0;
 	ber_socket_t connindex;
 	Connection* c;
-	time_t old;
-
-	old = slapd_get_writetime();
 
 	for( c = connection_first( &connindex );
 		c != NULL;
 		c = connection_next( c, &connindex ) )
 	{
 		/* Don't timeout a slow-running request or a persistent
-		 * outbound connection. But if it has a writewaiter, see
-		 * if the waiter has been there too long.
+		 * outbound connection.
 		 */
 		if(( c->c_n_ops_executing && !c->c_writewaiter)
 			|| c->c_conn_state == SLAP_C_CLIENT ) {
@@ -236,20 +230,8 @@ int connections_timeout_idle(time_t now)
 			i++;
 			continue;
 		}
-		if ( c->c_writewaiter && global_writetimeout ) {
-			writers = 1;
-			if( difftime( c->c_activitytime+global_writetimeout, now) < 0 ) {
-				/* close it */
-				connection_closing( c, "writetimeout" );
-				connection_close( c );
-				i++;
-				continue;
-			}
-		}
 	}
 	connection_done( c );
-	if ( old && !writers )
-		slapd_clr_writetime( old );
 
 	return i;
 }
@@ -406,6 +388,7 @@ Connection * connection_init(
 		c->c_sasl_sockctx = NULL;
 		c->c_sasl_extra = NULL;
 		c->c_sasl_bindop = NULL;
+		c->c_sasl_cbind = NULL;
 
 		c->c_sb = ber_sockbuf_alloc( );
 
@@ -419,9 +402,7 @@ Connection * connection_init(
 		/* should check status of thread calls */
 		ldap_pvt_thread_mutex_init( &c->c_mutex );
 		ldap_pvt_thread_mutex_init( &c->c_write1_mutex );
-		ldap_pvt_thread_mutex_init( &c->c_write2_mutex );
 		ldap_pvt_thread_cond_init( &c->c_write1_cv );
-		ldap_pvt_thread_cond_init( &c->c_write2_cv );
 
 #ifdef LDAP_SLAPI
 		if ( slapi_plugins_used ) {
@@ -451,6 +432,7 @@ Connection * connection_init(
 	assert( c->c_sasl_sockctx == NULL );
 	assert( c->c_sasl_extra == NULL );
 	assert( c->c_sasl_bindop == NULL );
+	assert( c->c_sasl_cbind == NULL );
 	assert( c->c_currentber == NULL );
 	assert( c->c_writewaiter == 0);
 	assert( c->c_writers == 0);
@@ -573,6 +555,11 @@ Connection * connection_init(
 
 	backend_connection_init(c);
 	ldap_pvt_thread_mutex_unlock( &c->c_mutex );
+
+	if ( !(flags & CONN_IS_UDP ))
+		Statslog( LDAP_DEBUG_STATS,
+			"conn=%ld fd=%ld ACCEPT from %s (%s)\n",
+			id, (long) s, peername, listener->sl_name.bv_val, 0 );
 
 	return c;
 }
@@ -773,10 +760,7 @@ connection_wake_writers( Connection *c )
 		ldap_pvt_thread_cond_broadcast( &c->c_write1_cv );
 		ldap_pvt_thread_mutex_unlock( &c->c_write1_mutex );
 		if ( c->c_writewaiter ) {
-			ldap_pvt_thread_mutex_lock( &c->c_write2_mutex );
-			ldap_pvt_thread_cond_signal( &c->c_write2_cv );
-			slapd_clr_write( c->c_sd, 1 );
-			ldap_pvt_thread_mutex_unlock( &c->c_write2_mutex );
+			slapd_shutsock( c->c_sd );
 		}
 		ldap_pvt_thread_mutex_lock( &c->c_write1_mutex );
 		while ( c->c_writers ) {
@@ -1304,11 +1288,6 @@ int connection_read_activate( ber_socket_t s )
 	if ( rc )
 		return rc;
 
-	/* Don't let blocked writers block a pause request */
-	if ( connections[s].c_writewaiter &&
-		ldap_pvt_thread_pool_pausing( &connection_pool ))
-		connection_wake_writers( &connections[s] );
-
 	rc = ldap_pvt_thread_pool_submit( &connection_pool,
 		connection_read_thread, (void *)(long)s );
 
@@ -1381,6 +1360,7 @@ connection_read( ber_socket_t s, conn_readinfo *cri )
 		} else if ( rc == 0 ) {
 			void *ssl;
 			struct berval authid = BER_BVNULL;
+			char msgbuf[32];
 
 			c->c_needs_tls_accept = 0;
 
@@ -1398,11 +1378,19 @@ connection_read( ber_socket_t s, conn_readinfo *cri )
 					"unable to get TLS client DN, error=%d id=%lu\n",
 					s, rc, c->c_connid );
 			}
+			sprintf(msgbuf, "tls_ssf=%u ssf=%u", c->c_tls_ssf, c->c_ssf);
 			Statslog( LDAP_DEBUG_STATS,
-				"conn=%lu fd=%d TLS established tls_ssf=%u ssf=%u\n",
-			    c->c_connid, (int) s, c->c_tls_ssf, c->c_ssf, 0 );
+				"conn=%lu fd=%d TLS established %s tls_proto=%s tls_cipher=%s\n",
+			    c->c_connid, (int) s,
+				msgbuf, ldap_pvt_tls_get_version( ssl ), ldap_pvt_tls_get_cipher( ssl ));
 			slap_sasl_external( c, c->c_tls_ssf, &authid );
 			if ( authid.bv_val ) free( authid.bv_val );
+			{
+				char cbinding[64];
+				struct berval cbv = { sizeof(cbinding), cbinding };
+				if ( ldap_pvt_tls_get_unique( ssl, &cbv, 1 ))
+					slap_sasl_cbinding( c, &cbv );
+			}
 		} else if ( rc == 1 && ber_sockbuf_ctrl( c->c_sb,
 			LBER_SB_OPT_NEEDS_WRITE, NULL )) {	/* need to retry */
 			slapd_set_write( s, 1 );
@@ -1511,22 +1499,53 @@ connection_input( Connection *conn , conn_readinfo *cri )
 
 #ifdef LDAP_CONNECTIONLESS
 	if ( conn->c_is_udp ) {
+#if defined(LDAP_PF_INET6)
+		char peername[sizeof("IP=[ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535")];
+		char addr[INET6_ADDRSTRLEN];
+#else
 		char peername[sizeof("IP=255.255.255.255:65336")];
+		char addr[INET_ADDRSTRLEN];
+#endif
 		const char *peeraddr_string = NULL;
 
-		len = ber_int_sb_read(conn->c_sb, &peeraddr, sizeof(struct sockaddr));
-		if (len != sizeof(struct sockaddr)) return 1;
+		len = ber_int_sb_read(conn->c_sb, &peeraddr, sizeof(Sockaddr));
+		if (len != sizeof(Sockaddr)) return 1;
 
+#if defined(LDAP_PF_INET6)
+		if (peeraddr.sa_addr.sa_family == AF_INET6) {
+			if ( IN6_IS_ADDR_V4MAPPED(&peeraddr.sa_in6_addr.sin6_addr) ) {
 #if defined( HAVE_GETADDRINFO ) && defined( HAVE_INET_NTOP )
-		char addr[INET_ADDRSTRLEN];
-		peeraddr_string = inet_ntop( AF_INET, &peeraddr.sa_in_addr.sin_addr,
+				peeraddr_string = inet_ntop( AF_INET,
+				   ((struct in_addr *)&peeraddr.sa_in6_addr.sin6_addr.s6_addr[12]),
+				   addr, sizeof(addr) );
+#else /* ! HAVE_GETADDRINFO || ! HAVE_INET_NTOP */
+				peeraddr_string = inet_ntoa( *((struct in_addr *)
+					&peeraddr.sa_in6_addr.sin6_addr.s6_addr[12]) );
+#endif /* ! HAVE_GETADDRINFO || ! HAVE_INET_NTOP */
+				if ( !peeraddr_string ) peeraddr_string = SLAP_STRING_UNKNOWN;
+				sprintf( peername, "IP=%s:%d", peeraddr_string,
+					(unsigned) ntohs( peeraddr.sa_in6_addr.sin6_port ) );
+			} else {
+				peeraddr_string = inet_ntop( AF_INET6,
+				      &peeraddr.sa_in6_addr.sin6_addr,
+				      addr, sizeof addr );
+				if ( !peeraddr_string ) peeraddr_string = SLAP_STRING_UNKNOWN;
+				sprintf( peername, "IP=[%s]:%d", peeraddr_string,
+					 (unsigned) ntohs( peeraddr.sa_in6_addr.sin6_port ) );
+			}
+		} else
+#endif
+#if defined( HAVE_GETADDRINFO ) && defined( HAVE_INET_NTOP )
+		{
+			peeraddr_string = inet_ntop( AF_INET, &peeraddr.sa_in_addr.sin_addr,
 			   addr, sizeof(addr) );
 #else /* ! HAVE_GETADDRINFO || ! HAVE_INET_NTOP */
-		peeraddr_string = inet_ntoa( peeraddr.sa_in_addr.sin_addr );
+			peeraddr_string = inet_ntoa( peeraddr.sa_in_addr.sin_addr );
 #endif /* ! HAVE_GETADDRINFO || ! HAVE_INET_NTOP */
-		sprintf( peername, "IP=%s:%d",
-			 peeraddr_string,
-			(unsigned) ntohs( peeraddr.sa_in_addr.sin_port ) );
+			sprintf( peername, "IP=%s:%d",
+				 peeraddr_string,
+				(unsigned) ntohs( peeraddr.sa_in_addr.sin_port ) );
+		}
 		Statslog( LDAP_DEBUG_STATS,
 			"conn=%lu UDP request from %s (%s) accepted.\n",
 			conn->c_connid, peername, conn->c_sock_name.bv_val, 0, 0 );
@@ -1902,6 +1921,7 @@ int connection_write(ber_socket_t s)
 {
 	Connection *c;
 	Operation *op;
+	int wantwrite;
 
 	assert( connections != NULL );
 
@@ -1928,14 +1948,13 @@ int connection_write(ber_socket_t s)
 	Debug( LDAP_DEBUG_TRACE,
 		"connection_write(%d): waking output for id=%lu\n",
 		s, c->c_connid, 0 );
-	ldap_pvt_thread_mutex_lock( &c->c_write2_mutex );
-	ldap_pvt_thread_cond_signal( &c->c_write2_cv );
-	ldap_pvt_thread_mutex_unlock( &c->c_write2_mutex );
 
-	if ( ber_sockbuf_ctrl( c->c_sb, LBER_SB_OPT_NEEDS_READ, NULL ) ) {
-		slapd_set_read( s, 1 );
+	wantwrite = ber_sockbuf_ctrl( c->c_sb, LBER_SB_OPT_NEEDS_WRITE, NULL );
+	if ( ber_sockbuf_ctrl( c->c_sb, LBER_SB_OPT_NEEDS_READ, NULL )) {
+		/* don't wakeup twice */
+		slapd_set_read( s, !wantwrite );
 	}
-	if ( ber_sockbuf_ctrl( c->c_sb, LBER_SB_OPT_NEEDS_WRITE, NULL ) ) {
+	if ( wantwrite ) {
 		slapd_set_write( s, 1 );
 	}
 

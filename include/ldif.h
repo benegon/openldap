@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -105,7 +105,7 @@ ldif_close LDAP_P(( LDIFFP * ));
 LDAP_LDIF_F( int )
 ldif_read_record LDAP_P((
 	LDIFFP *fp,
-	int *lineno,
+	unsigned long *lineno,
 	char **bufp,
 	int *buflen ));
 

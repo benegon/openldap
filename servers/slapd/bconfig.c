@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2005-2012 The OpenLDAP Foundation.
+ * Copyright 2005-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -197,6 +197,9 @@ enum {
 	CFG_SYNC_SUBENTRY,
 	CFG_LTHREADS,
 	CFG_IX_HASH64,
+	CFG_DISABLED,
+	CFG_THREADQS,
+	CFG_TLS_ECNAME,
 
 	CFG_LAST
 };
@@ -364,6 +367,9 @@ static ConfigTable config_back_cf_table[] = {
 	{ "defaultSearchBase", "dn", 2, 2, 0, ARG_PRE_BI|ARG_PRE_DB|ARG_DN|ARG_QUOTE|ARG_MAGIC,
 		&config_search_base, "( OLcfgGlAt:14 NAME 'olcDefaultSearchBase' "
 			"SYNTAX OMsDN SINGLE-VALUE )", NULL, NULL },
+	{ "disabled", "on|off", 2, 2, 0, ARG_DB|ARG_ON_OFF|ARG_MAGIC|CFG_DISABLED,
+		&config_generic, "( OLcfgDbAt:0.21 NAME 'olcDisabled' "
+			"SYNTAX OMsBoolean SINGLE-VALUE )", NULL, NULL },
 	{ "disallows", "features", 2, 0, 8, ARG_PRE_DB|ARG_MAGIC,
 		&config_disallows, "( OLcfgGlAt:15 NAME 'olcDisallows' "
 			"EQUALITY caseIgnoreMatch "
@@ -679,6 +685,14 @@ static ConfigTable config_back_cf_table[] = {
 #endif
 		"( OLcfgGlAt:66 NAME 'olcThreads' "
 			"SYNTAX OMsInteger SINGLE-VALUE )", NULL, NULL },
+	{ "threadqueues", "count", 2, 2, 0,
+#ifdef NO_THREADS
+		ARG_IGNORED, NULL,
+#else
+		ARG_INT|ARG_MAGIC|CFG_THREADQS, &config_generic,
+#endif
+		"( OLcfgGlAt:95 NAME 'olcThreadQueues' "
+			"SYNTAX OMsInteger SINGLE-VALUE )", NULL, NULL },
 	{ "timelimit", "limit", 2, 0, 0, ARG_MAY_DB|ARG_MAGIC,
 		&config_timelimit, "( OLcfgGlAt:67 NAME 'olcTimeLimit' "
 			"SYNTAX OMsDirectoryString )", NULL, NULL },
@@ -762,6 +776,14 @@ static ConfigTable config_back_cf_table[] = {
 #endif
 		"( OLcfgGlAt:77 NAME 'olcTLSDHParamFile' "
 			"SYNTAX OMsDirectoryString SINGLE-VALUE )", NULL, NULL },
+	{ "TLSECName", NULL, 2, 2, 0,
+#ifdef HAVE_TLS
+		CFG_TLS_ECNAME|ARG_STRING|ARG_MAGIC, &config_tls_option,
+#else
+		ARG_IGNORED, NULL,
+#endif
+		"( OLcfgGlAt:96 NAME 'olcTLSECName' "
+			"SYNTAX OMsDirectoryString SINGLE-VALUE )", NULL, NULL },
 	{ "TLSProtocolMin",	NULL, 2, 2, 0,
 #ifdef HAVE_TLS
 		CFG_TLS_PROTOCOL_MIN|ARG_STRING|ARG_MAGIC, &config_tls_config,
@@ -831,7 +853,8 @@ static ConfigOCs cf_ocs[] = {
 		 "olcDisallows $ olcGentleHUP $ olcIdleTimeout $ "
 		 "olcIndexSubstrIfMaxLen $ olcIndexSubstrIfMinLen $ "
 		 "olcIndexSubstrAnyLen $ olcIndexSubstrAnyStep $ olcIndexHash64 $ "
-		 "olcIndexIntLen $ olcLocalSSF $ olcLogFile $ olcLogLevel $ "
+		 "olcIndexIntLen $ "
+		 "olcListenerThreads $ olcLocalSSF $ olcLogFile $ olcLogLevel $ "
 		 "olcPasswordCryptSaltFormat $ olcPasswordHash $ olcPidFile $ "
 		 "olcPluginLogFile $ olcReadOnly $ olcReferral $ "
 		 "olcReplogFile $ olcRequires $ olcRestrict $ olcReverseLookup $ "
@@ -841,11 +864,12 @@ static ConfigOCs cf_ocs[] = {
 		 "olcSecurity $ olcServerID $ olcSizeLimit $ "
 		 "olcSockbufMaxIncoming $ olcSockbufMaxIncomingAuth $ "
 		 "olcTCPBuffer $ "
-		 "olcThreads $ olcTimeLimit $ olcTLSCACertificateFile $ "
+		 "olcThreads $ olcThreadQueues $ "
+		 "olcTimeLimit $ olcTLSCACertificateFile $ "
 		 "olcTLSCACertificatePath $ olcTLSCertificateFile $ "
 		 "olcTLSCertificateKeyFile $ olcTLSCipherSuite $ olcTLSCRLCheck $ "
-		 "olcTLSRandFile $ olcTLSVerifyClient $ olcTLSDHParamFile $ "
-		 "olcTLSCRLFile $ olcToolThreads $ olcWriteTimeout $ "
+		 "olcTLSRandFile $ olcTLSVerifyClient $ olcTLSDHParamFile $ olcTLSECName $ "
+		 "olcTLSCRLFile $ olcTLSProtocolMin $ olcToolThreads $ olcWriteTimeout $ "
 		 "olcObjectIdentifier $ olcAttributeTypes $ olcObjectClasses $ "
 		 "olcDitContentRules $ olcLdapSyntaxes ) )", Cft_Global },
 	{ "( OLcfgGlOc:2 "
@@ -865,7 +889,7 @@ static ConfigOCs cf_ocs[] = {
 		"DESC 'OpenLDAP Database-specific options' "
 		"SUP olcConfig STRUCTURAL "
 		"MUST olcDatabase "
-		"MAY ( olcHidden $ olcSuffix $ olcSubordinate $ olcAccess $ "
+		"MAY ( olcDisabled $ olcHidden $ olcSuffix $ olcSubordinate $ olcAccess $ "
 		 "olcAddContentAcl $ olcLastMod $ olcLimits $ "
 		 "olcMaxDerefDepth $ olcPlugin $ olcReadOnly $ olcReplica $ "
 		 "olcReplicaArgsFile $ olcReplicaPidFile $ olcReplicationInterval $ "
@@ -878,7 +902,8 @@ static ConfigOCs cf_ocs[] = {
 		"NAME 'olcOverlayConfig' "
 		"DESC 'OpenLDAP Overlay-specific options' "
 		"SUP olcConfig STRUCTURAL "
-		"MUST olcOverlay )", Cft_Overlay, NULL, cfAddOverlay },
+		"MUST olcOverlay "
+		"MAY olcDisabled )", Cft_Overlay, NULL, cfAddOverlay },
 	{ "( OLcfgGlOc:6 "
 		"NAME 'olcIncludeFile' "
 		"DESC 'OpenLDAP configuration include file' "
@@ -941,6 +966,9 @@ config_generic(ConfigArgs *c) {
 			break;
 		case CFG_THREADS:
 			c->value_int = connection_pool_max;
+			break;
+		case CFG_THREADQS:
+			c->value_int = connection_pool_queues;
 			break;
 		case CFG_TTHREADS:
 			c->value_int = slap_tool_thread_max;
@@ -1042,6 +1070,23 @@ config_generic(ConfigArgs *c) {
 #endif
 		case CFG_DEPTH:
 			c->value_int = c->be->be_max_deref_depth;
+			break;
+		case CFG_DISABLED:
+			if ( c->bi ) {
+				/* overlay */
+				if ( c->bi->bi_flags & SLAPO_BFLAG_DISABLED ) {
+					c->value_int = 1;
+				} else {
+					rc = 1;
+				}
+			} else {
+				/* database */
+				if ( SLAP_DBDISABLED( c->be )) {
+					c->value_int = 1;
+				} else {
+					rc = 1;
+				}
+			}
 			break;
 		case CFG_HIDDEN:
 			if ( SLAP_DBHIDDEN( c->be )) {
@@ -1292,6 +1337,7 @@ config_generic(ConfigArgs *c) {
 		/* single-valued attrs, no-ops */
 		case CFG_CONCUR:
 		case CFG_THREADS:
+		case CFG_THREADQS:
 		case CFG_TTHREADS:
 		case CFG_LTHREADS:
 		case CFG_RO:
@@ -1383,6 +1429,21 @@ config_generic(ConfigArgs *c) {
 			break;
 		case CFG_HIDDEN:
 			c->be->be_flags &= ~SLAP_DBFLAG_HIDDEN;
+			break;
+
+		case CFG_DISABLED:
+			if ( c->bi ) {
+				c->bi->bi_flags &= ~SLAP_DBFLAG_DISABLED;
+				if ( c->bi->bi_db_open ) {
+					BackendInfo *bi_orig = c->be->bd_info;
+					c->be->bd_info = c->bi;
+					rc = c->bi->bi_db_open( c->be, &c->reply );
+					c->be->bd_info = bi_orig;
+				}
+			} else {
+				c->be->be_flags &= ~SLAP_DBFLAG_DISABLED;
+				rc = backend_startup_one( c->be, &c->reply );
+			}
 			break;
 
 		case CFG_IX_HASH64:
@@ -1654,6 +1715,20 @@ config_generic(ConfigArgs *c) {
 			if ( slapMode & SLAP_SERVER_MODE )
 				ldap_pvt_thread_pool_maxthreads(&connection_pool, c->value_int);
 			connection_pool_max = c->value_int;	/* save for reference */
+			break;
+
+		case CFG_THREADQS:
+			if ( c->value_int < 1 ) {
+				snprintf( c->cr_msg, sizeof( c->cr_msg ),
+					"threadqueuess=%d smaller than minimum value 1",
+					c->value_int );
+				Debug(LDAP_DEBUG_ANY, "%s: %s.\n",
+					c->log, c->cr_msg, 0 );
+				return 1;
+			}
+			if ( slapMode & SLAP_SERVER_MODE )
+				ldap_pvt_thread_pool_queues(&connection_pool, c->value_int);
+			connection_pool_queues = c->value_int;	/* save for reference */
 			break;
 
 		case CFG_TTHREADS:
@@ -2127,6 +2202,29 @@ sortval_reject:
 				SLAP_DBFLAGS(c->be) |= SLAP_DBFLAG_MONITORING;
 			else
 				SLAP_DBFLAGS(c->be) &= ~SLAP_DBFLAG_MONITORING;
+			break;
+
+		case CFG_DISABLED:
+			if ( c->bi ) {
+				if (c->value_int) {
+					if ( c->bi->bi_db_close ) {
+						BackendInfo *bi_orig = c->be->bd_info;
+						c->be->bd_info = c->bi;
+						c->bi->bi_db_close( c->be, &c->reply );
+						c->be->bd_info = bi_orig;
+					}
+					c->bi->bi_flags |= SLAPO_BFLAG_DISABLED;
+				} else {
+					c->bi->bi_flags &= ~SLAPO_BFLAG_DISABLED;
+				}
+			} else {
+				if (c->value_int) {
+					backend_shutdown( c->be );
+					SLAP_DBFLAGS(c->be) |= SLAP_DBFLAG_DISABLED;
+				} else {
+					SLAP_DBFLAGS(c->be) &= ~SLAP_DBFLAG_DISABLED;
+				}
+			}
 			break;
 
 		case CFG_HIDDEN:
@@ -3562,6 +3660,11 @@ loglevel2bvarray( int l, BerVarray *bva )
 		loglevel_init();
 	}
 
+	if ( l == 0 ) {
+		struct berval bv = BER_BVC("0");
+		return value_add_one( bva, &bv );
+	}
+
 	return mask_to_verbs( loglevel_ops, l, bva );
 }
 
@@ -3936,6 +4039,7 @@ config_tls_cleanup(ConfigArgs *c) {
 		int opt = 1;
 
 		ldap_pvt_tls_ctx_free( slap_tls_ctx );
+		slap_tls_ctx = NULL;
 
 		/* Force new ctx to be created */
 		rc = ldap_pvt_tls_set_option( slap_tls_ld, LDAP_OPT_X_TLS_NEWCTX, &opt );
@@ -3944,6 +4048,11 @@ config_tls_cleanup(ConfigArgs *c) {
 			ldap_pvt_tls_get_option( slap_tls_ld, LDAP_OPT_X_TLS_CTX, &slap_tls_ctx );
 			/* This is a no-op if it's already loaded */
 			load_extop( &slap_EXOP_START_TLS, 0, starttls_extop );
+		} else {
+			if ( rc == LDAP_NOT_SUPPORTED )
+				rc = LDAP_UNWILLING_TO_PERFORM;
+			else
+				rc = LDAP_OTHER;
 		}
 	}
 	return rc;
@@ -3961,6 +4070,7 @@ config_tls_option(ConfigArgs *c) {
 	case CFG_TLS_CA_PATH:	flag = LDAP_OPT_X_TLS_CACERTDIR;	break;
 	case CFG_TLS_CA_FILE:	flag = LDAP_OPT_X_TLS_CACERTFILE;	break;
 	case CFG_TLS_DH_FILE:	flag = LDAP_OPT_X_TLS_DHFILE;	break;
+	case CFG_TLS_ECNAME:	flag = LDAP_OPT_X_TLS_ECNAME;	break;
 #ifdef HAVE_GNUTLS
 	case CFG_TLS_CRL_FILE:	flag = LDAP_OPT_X_TLS_CRLFILE;	break;
 #endif
@@ -4003,7 +4113,7 @@ config_tls_config(ConfigArgs *c) {
 	}
 	ch_free( c->value_string );
 	c->cleanup = config_tls_cleanup;
-	if ( isdigit( (unsigned char)c->argv[1][0] ) ) {
+	if ( isdigit( (unsigned char)c->argv[1][0] ) && c->type != CFG_TLS_PROTOCOL_MIN ) {
 		if ( lutil_atoi( &i, c->argv[1] ) != 0 ) {
 			Debug(LDAP_DEBUG_ANY, "%s: "
 				"unable to parse %s \"%s\"\n",
@@ -5949,8 +6059,11 @@ out:
 		ca->reply = msg;
 	}
 
-	if ( ca->cleanup )
-		ca->cleanup( ca );
+	if ( ca->cleanup ) {
+		i = ca->cleanup( ca );
+		if (rc == LDAP_SUCCESS)
+			rc = i;
+	}
 out_noop:
 	if ( rc == LDAP_SUCCESS ) {
 		attrs_free( save_attrs );
@@ -6691,7 +6804,7 @@ config_build_schema_inc( ConfigArgs *c, CfEntryInfo *ceparent,
 
 	for (; cf; cf=cf->c_sibs, c->depth++) {
 		if ( !cf->c_at_head && !cf->c_cr_head && !cf->c_oc_head &&
-			!cf->c_om_head && !cf->c_syn_head ) continue;
+			!cf->c_om_head && !cf->c_syn_head && !cf->c_kids ) continue;
 		c->value_dn.bv_val = c->log;
 		LUTIL_SLASHPATH( cf->c_file.bv_val );
 		bv.bv_val = strrchr(cf->c_file.bv_val, LDAP_DIRSEP[0]);

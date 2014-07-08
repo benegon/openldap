@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -58,7 +58,6 @@
 
 LDAP_BEGIN_DECL
 
-#ifdef LDAP_DEVEL
 #define LDAP_COLLECTIVE_ATTRIBUTES
 #define LDAP_COMP_MATCH
 #define LDAP_SYNC_TIMESTAMP
@@ -67,7 +66,6 @@ LDAP_BEGIN_DECL
 #define SLAP_AUXPROP_DONTUSECOPY
 #ifndef SLAP_SCHEMA_EXPOSE
 #define SLAP_SCHEMA_EXPOSE
-#endif
 #endif
 
 #define LDAP_DYNAMIC_OBJECTS
@@ -1605,6 +1603,8 @@ LDAP_SLAPD_V (int) slapMode;
 #define SLAP_TOOL_NO_SCHEMA_CHECK	0x1000
 #define SLAP_TOOL_VALUE_CHECK	0x2000
 
+#define SLAP_SERVER_RUNNING	0x8000
+
 #define SB_TLS_DEFAULT		(-1)
 #define SB_TLS_OFF		0
 #define SB_TLS_ON		1
@@ -1852,11 +1852,13 @@ struct BackendDB {
 #define SLAP_DBFLAG_ACL_ADD		0x20000U /* check attr ACLs on adds */
 #define SLAP_DBFLAG_SYNC_SUBENTRY	0x40000U /* use subentry for context */
 #define SLAP_DBFLAG_MULTI_SHADOW	0x80000U /* uses mirrorMode/multi-master */
+#define SLAP_DBFLAG_DISABLED	0x100000U
 	slap_mask_t	be_flags;
 #define SLAP_DBFLAGS(be)			((be)->be_flags)
 #define SLAP_NOLASTMOD(be)			(SLAP_DBFLAGS(be) & SLAP_DBFLAG_NOLASTMOD)
 #define SLAP_LASTMOD(be)			(!SLAP_NOLASTMOD(be))
 #define SLAP_DBHIDDEN(be)			(SLAP_DBFLAGS(be) & SLAP_DBFLAG_HIDDEN)
+#define SLAP_DBDISABLED(be)			(SLAP_DBFLAGS(be) & SLAP_DBFLAG_DISABLED)
 #define SLAP_DB_ONE_SUFFIX(be)		(SLAP_DBFLAGS(be) & SLAP_DBFLAG_ONE_SUFFIX)
 #define SLAP_ISOVERLAY(be)			(SLAP_DBFLAGS(be) & SLAP_DBFLAG_OVERLAY)
 #define SLAP_ISGLOBALOVERLAY(be)		(SLAP_DBFLAGS(be) & SLAP_DBFLAG_GLOBAL_OVERLAY)
@@ -2316,6 +2318,7 @@ struct BackendInfo {
 #define	SLAPO_BFLAG_SINGLE		0x01000000U
 #define	SLAPO_BFLAG_DBONLY		0x02000000U
 #define	SLAPO_BFLAG_GLOBONLY		0x04000000U
+#define	SLAPO_BFLAG_DISABLED		0x08000000U
 #define	SLAPO_BFLAG_MASK		0xFF000000U
 
 #define SLAP_BFLAGS(be)		((be)->bd_info->bi_flags)
@@ -2334,6 +2337,7 @@ struct BackendInfo {
 #define SLAPO_SINGLE(be)	(SLAP_BFLAGS(be) & SLAPO_BFLAG_SINGLE)
 #define SLAPO_DBONLY(be)	(SLAP_BFLAGS(be) & SLAPO_BFLAG_DBONLY)
 #define SLAPO_GLOBONLY(be)	(SLAP_BFLAGS(be) & SLAPO_BFLAG_GLOBONLY)
+#define SLAPO_DISABLED(be)	(SLAP_BFLAGS(be) & SLAPO_BFLAG_DISABLED)
 
 	char	**bi_controls;		/* supported controls */
 	char	bi_ctrls[SLAP_MAX_CIDS + 1];
@@ -2904,6 +2908,7 @@ struct Connection {
 	void	*c_sasl_authctx;	/* SASL authentication context */
 	void	*c_sasl_sockctx;	/* SASL security layer context */
 	void	*c_sasl_extra;		/* SASL session extra stuff */
+	void	*c_sasl_cbind;		/* SASL channel binding */
 	Operation	*c_sasl_bindop;	/* set to current op if it's a bind */
 
 #ifdef LDAP_X_TXN
@@ -2987,9 +2992,7 @@ struct Listener {
 	ber_socket_t sl_sd;
 	Sockaddr sl_sa;
 #define sl_addr	sl_sa.sa_in_addr
-#ifdef LDAP_DEVEL
 #define LDAP_TCP_BUFFER
-#endif
 #ifdef LDAP_TCP_BUFFER
 	int	sl_tcp_rmem;	/* custom TCP read buffer size */
 	int	sl_tcp_wmem;	/* custom TCP write buffer size */

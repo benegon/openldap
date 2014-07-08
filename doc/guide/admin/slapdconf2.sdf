@@ -1,5 +1,5 @@
 # $OpenLDAP$
-# Copyright 2005-2012 The OpenLDAP Foundation, All Rights Reserved.
+# Copyright 2005-2014 The OpenLDAP Foundation, All Rights Reserved.
 # COPYING RESTRICTIONS APPLY, see COPYRIGHT.
 
 H1: Configuring slapd
@@ -364,12 +364,13 @@ supported backend types listed in Table 5.2.
 !block table; align=Center; coltags="EX,N"; \
 	title="Table 5.2: Database Backends"
 Types	Description
-bdb	Berkeley DB transactional backend
+bdb	Berkeley DB transactional backend (deprecated)
 config	Slapd configuration backend
 dnssrv	DNS SRV backend
-hdb	Hierarchical variant of bdb backend
+hdb	Hierarchical variant of bdb backend (deprecated)
 ldap	Lightweight Directory Access Protocol (Proxy) backend
 ldif	Lightweight Data Interchange Format backend
+mdb	Memory-Mapped DB backend
 meta	Meta Directory backend
 monitor	Monitor backend
 passwd	Provides read-only access to {{passwd}}(5)
@@ -449,7 +450,8 @@ H4: olcReadonly { TRUE | FALSE }
 
 This directive puts the database into "read-only" mode. Any
 attempts to modify the database will return an "unwilling to
-perform" error.
+perform" error.  If set on a consumer, modifications sent by
+syncrepl will still occur.
 
 \Default:
 
@@ -1076,12 +1078,12 @@ E: 30.    dn: olcDatabase=bdb,cn=config
 E: 31.    objectClass: olcDatabaseConfig
 E: 32.    objectClass: olcBdbConfig
 E: 33.    olcDatabase: bdb
-E: 34.    olcSuffix: "dc=example,dc=com"
+E: 34.    olcSuffix: dc=example,dc=com
 E: 35.    olcDbDirectory: /usr/local/var/openldap-data
-E: 36.    olcRootDN: "cn=Manager,dc=example,dc=com"
+E: 36.    olcRootDN: cn=Manager,dc=example,dc=com
 E: 37.    olcRootPW: secret
 E: 38.    olcDbIndex: uid pres,eq
-E: 39.    olcDbIndex: cn,sn,uid pres,eq,approx,sub
+E: 39.    olcDbIndex: cn,sn pres,eq,approx,sub
 E: 40.    olcDbIndex: objectClass eq
 E: 41.    olcAccess: to attrs=userPassword
 E: 42.      by self write

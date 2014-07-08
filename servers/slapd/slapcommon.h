@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,9 +43,9 @@ typedef struct tool_vars {
 	int tv_continuemode;
 	int tv_nosubordinates;
 	int tv_dryrun;
-	int tv_jumpline;
-	struct berval tv_sub_ndn;
 	int tv_scope;
+	unsigned long tv_jumpline;
+	struct berval tv_sub_ndn;
 	Filter *tv_filter;
 	struct LDIFFP	*tv_ldiffp;
 	struct berval tv_baseDN;

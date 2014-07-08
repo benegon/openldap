@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2000-2012 The OpenLDAP Foundation.
+ * Copyright 2000-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -161,6 +161,7 @@ rewrite_session_find(
 #ifdef USE_REWRITE_LDAP_PVT_THREADS
 	if ( session ) {
 		ldap_pvt_thread_mutex_lock( &session->ls_mutex );
+		session->ls_count++;
 	}
 	ldap_pvt_thread_rdwr_runlock( &info->li_cookies_mutex );
 #endif /* USE_REWRITE_LDAP_PVT_THREADS */
@@ -178,6 +179,7 @@ rewrite_session_return(
 )
 {
 	assert( session != NULL );
+	session->ls_count--;
 	ldap_pvt_thread_mutex_unlock( &session->ls_mutex );
 }
 

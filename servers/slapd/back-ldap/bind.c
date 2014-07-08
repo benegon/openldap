@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1999-2012 The OpenLDAP Foundation.
+ * Copyright 1999-2014 The OpenLDAP Foundation.
  * Portions Copyright 2000-2003 Pierangelo Masarati.
  * Portions Copyright 1999-2003 Howard Chu.
  * All rights reserved.
@@ -37,9 +37,7 @@
 
 #define LDAP_CONTROL_OBSOLETE_PROXY_AUTHZ	"2.16.840.1.113730.3.4.12"
 
-#ifdef LDAP_DEVEL
 #define SLAP_AUTH_DN 1
-#endif
 
 #if LDAP_BACK_PRINT_CONNTREE > 0
 
@@ -715,6 +713,9 @@ ldap_back_prepare_conn( ldapconn_t *lc, Operation *op, SlapReply *rs, ldap_back_
 		tv.tv_usec = 0;
 		ldap_set_option( ld, LDAP_OPT_NETWORK_TIMEOUT, (const void *)&tv );
 	}
+
+	/* turn on network keepalive, if configured so */
+	slap_client_keepalive(ld, &li->li_tls.sb_keepalive);
 
 #ifdef HAVE_TLS
 	if ( LDAP_BACK_CONN_ISPRIV( lc ) ) {

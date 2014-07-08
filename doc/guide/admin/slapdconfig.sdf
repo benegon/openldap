@@ -1,5 +1,5 @@
 # $OpenLDAP$
-# Copyright 1999-2012 The OpenLDAP Foundation, All Rights Reserved.
+# Copyright 1999-2014 The OpenLDAP Foundation, All Rights Reserved.
 # COPYING RESTRICTIONS APPLY, see COPYRIGHT.
 
 H1: The slapd Configuration File
@@ -264,10 +264,11 @@ supported backend types listed in Table 6.2.
 !block table; align=Center; coltags="EX,N"; \
 	title="Table 6.2: Database Backends"
 Types	Description
-bdb	Berkeley DB transactional backend
+bdb	Berkeley DB transactional backend (deprecated)
 dnssrv	DNS SRV backend
-hdb	Hierarchical variant of bdb backend
+hdb	Hierarchical variant of bdb backend (deprecated)
 ldap	Lightweight Directory Access Protocol (Proxy) backend
+mdb	Memory-Mapped DB backend
 meta	Meta Directory backend
 monitor	Monitor backend
 passwd	Provides read-only access to {{passwd}}(5)
@@ -316,7 +317,8 @@ H4: readonly { on | off }
 
 This directive puts the database into "read-only" mode. Any
 attempts to modify the database will return an "unwilling to
-perform" error.
+perform" error.  If set on a consumer, modifications sent by
+syncrepl will still occur.
 
 \Default:
 
@@ -534,8 +536,8 @@ conforms to the obsolete {{changelog}} format. If the {{EX:syncdata}}
 parameter is omitted or set to {{EX:"default"}} then the log
 parameters are ignored.
 
-The {{syncrepl}} replication mechanism is supported by the {{bdb}} and
-{{hdb}} backends.
+The {{syncrepl}} replication mechanism is supported by the {{bdb}},
+{{hdb}}, and {{mdb}} backends.
 
 See the {{SECT:LDAP Sync Replication}} chapter of this guide for
 more information on how to use this directive.
@@ -615,7 +617,7 @@ E:  9.    rootdn "cn=Manager,dc=example,dc=com"
 E: 10.    rootpw secret
 E: 11.    # indexed attribute definitions
 E: 12.    index uid pres,eq
-E: 13.    index cn,sn,uid pres,eq,approx,sub
+E: 13.    index cn,sn pres,eq,approx,sub
 E: 14.    index objectClass eq
 E: 15.    # database access control definitions
 E: 16.    access to attrs=userPassword

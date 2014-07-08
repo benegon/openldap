@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  * 
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -212,6 +212,13 @@ ldap_pvt_thread_pool_init LDAP_P((
 	ldap_pvt_thread_pool_t *pool_out,
 	int max_threads,
 	int max_pending ));
+
+LDAP_F( int )
+ldap_pvt_thread_pool_init_q LDAP_P((
+	ldap_pvt_thread_pool_t *pool_out,
+	int max_threads,
+	int max_pending,
+	int num_qs ));
 
 LDAP_F( int )
 ldap_pvt_thread_pool_submit LDAP_P((

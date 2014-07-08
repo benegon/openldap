@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2008-2012 The OpenLDAP Foundation.
+ * Copyright 2008-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,35 +43,6 @@
 
 #include <gnutls/gnutls.h>
 #include <gnutls/x509.h>
-#include <gcrypt.h>
-
-#define DH_BITS	(1024)
-
-#if LIBGNUTLS_VERSION_NUMBER >= 0x020200
-#define	HAVE_CIPHERSUITES	1
-/* This is a kludge. gcrypt 1.4.x has support. Recent GnuTLS requires gcrypt 1.4.x
- * but that dependency isn't reflected in their configure script, resulting in
- * build errors on older gcrypt. So, if they have a working build environment,
- * assume gcrypt is new enough.
- */
-#define HAVE_GCRYPT_RAND	1
-#else
-#undef HAVE_CIPHERSUITES
-#undef HAVE_GCRYPT_RAND
-#endif
-
-#ifndef HAVE_CIPHERSUITES
-/* Versions prior to 2.2.0 didn't handle cipher suites, so we had to
- * kludge them ourselves.
- */
-typedef struct tls_cipher_suite {
-	const char *name;
-	gnutls_kx_algorithm_t kx;
-	gnutls_cipher_algorithm_t cipher;
-	gnutls_mac_algorithm_t mac;
-	gnutls_protocol_t version;
-} tls_cipher_suite;
-#endif
 
 typedef struct tlsg_ctx {
 	struct ldapoptions *lo;
@@ -79,13 +50,7 @@ typedef struct tlsg_ctx {
 	gnutls_dh_params_t dh_params;
 	unsigned long verify_depth;
 	int refcount;
-#ifdef HAVE_CIPHERSUITES
 	gnutls_priority_t prios;
-#else
-	int *kx_list;
-	int *cipher_list;
-	int *mac_list;
-#endif
 #ifdef LDAP_R_COMPILE
 	ldap_pvt_thread_mutex_t ref_mutex;
 #endif
@@ -96,11 +61,6 @@ typedef struct tlsg_session {
 	tlsg_ctx *ctx;
 	struct berval peer_der_dn;
 } tlsg_session;
-
-#ifndef HAVE_CIPHERSUITES
-static tls_cipher_suite *tlsg_ciphers;
-static int tlsg_n_ciphers;
-#endif
 
 static int tlsg_parse_ciphers( tlsg_ctx *ctx, char *suites );
 static int tlsg_cert_verify( tlsg_session *s );
@@ -145,20 +105,13 @@ tlsg_mutex_unlock( void **lock )
 	return ldap_pvt_thread_mutex_unlock( *lock );
 }
 
-static struct gcry_thread_cbs tlsg_thread_cbs = {
-	GCRY_THREAD_OPTION_USER,
-	NULL,
-	tlsg_mutex_init,
-	tlsg_mutex_destroy,
-	tlsg_mutex_lock,
-	tlsg_mutex_unlock,
-	NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-};
-
 static void
 tlsg_thr_init( void )
 {
-	gcry_control (GCRYCTL_SET_THREAD_CBS, &tlsg_thread_cbs);
+	gnutls_global_set_mutex (tlsg_mutex_init,
+		tlsg_mutex_destroy,
+		tlsg_mutex_lock,
+		tlsg_mutex_unlock);
 }
 #endif /* LDAP_R_COMPILE */
 
@@ -168,47 +121,7 @@ tlsg_thr_init( void )
 static int
 tlsg_init( void )
 {
-#ifdef HAVE_GCRYPT_RAND
-	struct ldapoptions *lo = LDAP_INT_GLOBAL_OPT();
-	if ( lo->ldo_tls_randfile &&
-		gcry_control( GCRYCTL_SET_RNDEGD_SOCKET, lo->ldo_tls_randfile )) {
-		Debug( LDAP_DEBUG_ANY,
-		"TLS: gcry_control GCRYCTL_SET_RNDEGD_SOCKET failed\n",
-		0, 0, 0);
-		return -1;
-	}
-#endif
-
 	gnutls_global_init();
-
-#ifndef HAVE_CIPHERSUITES
-	/* GNUtls cipher suite handling: The library ought to parse suite
-	 * names for us, but it doesn't. It will return a list of suite names
-	 * that it supports, so we can do parsing ourselves. It ought to tell
-	 * us how long the list is, but it doesn't do that either, so we just
-	 * have to count it manually...
-	 */
-	{
-		int i = 0;
-		tls_cipher_suite *ptr, tmp;
-		char cs_id[2];
-
-		while ( gnutls_cipher_suite_info( i, cs_id, &tmp.kx, &tmp.cipher,
-			&tmp.mac, &tmp.version ))
-			i++;
-		tlsg_n_ciphers = i;
-
-		/* Store a copy */
-		tlsg_ciphers = LDAP_MALLOC(tlsg_n_ciphers * sizeof(tls_cipher_suite));
-		if ( !tlsg_ciphers )
-			return -1;
-		for ( i=0; i<tlsg_n_ciphers; i++ ) {
-			tlsg_ciphers[i].name = gnutls_cipher_suite_info( i, cs_id,
-				&tlsg_ciphers[i].kx, &tlsg_ciphers[i].cipher, &tlsg_ciphers[i].mac,
-				&tlsg_ciphers[i].version );
-		}
-	}
-#endif
 	return 0;
 }
 
@@ -218,11 +131,6 @@ tlsg_init( void )
 static void
 tlsg_destroy( void )
 {
-#ifndef HAVE_CIPHERSUITES
-	LDAP_FREE( tlsg_ciphers );
-	tlsg_ciphers = NULL;
-	tlsg_n_ciphers = 0;
-#endif
 	gnutls_global_deinit();
 }
 
@@ -239,9 +147,7 @@ tlsg_ctx_new ( struct ldapoptions *lo )
 			return NULL;
 		}
 		ctx->refcount = 1;
-#ifdef HAVE_CIPHERSUITES
 		gnutls_priority_init( &ctx->prios, "NORMAL", NULL );
-#endif
 #ifdef LDAP_R_COMPILE
 		ldap_pvt_thread_mutex_init( &ctx->ref_mutex );
 #endif
@@ -271,12 +177,10 @@ tlsg_ctx_free ( tls_ctx *ctx )
 	LDAP_MUTEX_UNLOCK( &c->ref_mutex );
 	if ( refcount )
 		return;
-#ifdef HAVE_CIPHERSUITES
 	gnutls_priority_deinit( c->prios );
-#else
-	LDAP_FREE( c->kx_list );
-#endif
 	gnutls_certificate_free_credentials( c->cred );
+	if ( c->dh_params )
+		gnutls_dh_params_deinit( c->dh_params );
 	ber_memfree ( c );
 }
 
@@ -368,23 +272,13 @@ tlsg_ctx_init( struct ldapoptions *lo, struct ldaptls *lt, int is_server )
 		 * then we have to build the cert chain.
 		 */
 		if ( max == 1 && !gnutls_x509_crt_check_issuer( certs[0], certs[0] )) {
-			gnutls_x509_crt_t *cas;
-			unsigned int i, j, ncas;
-
-			gnutls_certificate_get_x509_cas( ctx->cred, &cas, &ncas );
+			unsigned int i;
 			for ( i = 1; i<VERIFY_DEPTH; i++ ) {
-				for ( j = 0; j<ncas; j++ ) {
-					if ( gnutls_x509_crt_check_issuer( certs[i-1], cas[j] )) {
-						certs[i] = cas[j];
-						max++;
-						/* If this CA is self-signed, we're done */
-						if ( gnutls_x509_crt_check_issuer( cas[j], cas[j] ))
-							j = ncas;
-						break;
-					}
-				}
-				/* only continue if we found a CA and it was not self-signed */
-				if ( j == ncas )
+				if ( gnutls_certificate_get_issuer( ctx->cred, certs[i-1], &certs[i], 0 ))
+					break;
+				max++;
+				/* If this CA is self-signed, we're done */
+				if ( gnutls_x509_crt_check_issuer( certs[i], certs[i] ))
 					break;
 			}
 		}
@@ -397,12 +291,6 @@ tlsg_ctx_init( struct ldapoptions *lo, struct ldaptls *lt, int is_server )
 		return -1;
 	}
 
-	if ( lo->ldo_tls_dhfile ) {
-		Debug( LDAP_DEBUG_ANY, 
-		       "TLS: warning: ignoring dhfile\n", 
-		       NULL, NULL, NULL );
-	}
-
 	if ( lo->ldo_tls_crlfile ) {
 		rc = gnutls_certificate_set_x509_crl_file( 
 			ctx->cred,
@@ -412,15 +300,23 @@ tlsg_ctx_init( struct ldapoptions *lo, struct ldaptls *lt, int is_server )
 		rc = 0;
 	}
 
-	/* FIXME: ITS#5992 - this should go be configurable,
+	/* FIXME: ITS#5992 - this should be configurable,
 	 * and V1 CA certs should be phased out ASAP.
 	 */
 	gnutls_certificate_set_verify_flags( ctx->cred,
 		GNUTLS_VERIFY_ALLOW_X509_V1_CA_CRT );
 
-	if ( is_server ) {
-		gnutls_dh_params_init(&ctx->dh_params);
-		gnutls_dh_params_generate2(ctx->dh_params, DH_BITS);
+	if ( is_server && lo->ldo_tls_dhfile ) {
+		gnutls_datum_t buf;
+		rc = tlsg_getfile( lo->ldo_tls_dhfile, &buf );
+		if ( rc ) return -1;
+		rc = gnutls_dh_params_init( &ctx->dh_params );
+		if ( rc == 0 )
+			rc = gnutls_dh_params_import_pkcs3( ctx->dh_params, &buf,
+				GNUTLS_X509_FMT_PEM );
+		LDAP_FREE( buf.data );
+		if ( rc ) return -1;
+		gnutls_certificate_set_dh_params( ctx->cred, ctx->dh_params );
 	}
 	return 0;
 }
@@ -437,16 +333,7 @@ tlsg_session_new ( tls_ctx * ctx, int is_server )
 
 	session->ctx = c;
 	gnutls_init( &session->session, is_server ? GNUTLS_SERVER : GNUTLS_CLIENT );
-#ifdef HAVE_CIPHERSUITES
 	gnutls_priority_set( session->session, c->prios );
-#else
-	gnutls_set_default_priority( session->session );
-	if ( c->kx_list ) {
-		gnutls_kx_set_priority( session->session, c->kx_list );
-		gnutls_cipher_set_priority( session->session, c->cipher_list );
-		gnutls_mac_set_priority( session->session, c->mac_list );
-	}
-#endif
 	if ( c->cred )
 		gnutls_credentials_set( session->session, GNUTLS_CRD_CERTIFICATE, c->cred );
 	
@@ -780,89 +667,66 @@ tlsg_session_strength( tls_session *session )
 	return gnutls_cipher_get_key_size( c ) * 8;
 }
 
+static int
+tlsg_session_unique( tls_session *sess, struct berval *buf, int is_server)
+{
+	tlsg_session *s = (tlsg_session *)sess;
+	gnutls_datum_t cb;
+	int rc;
+
+	rc = gnutls_session_channel_binding( s->session, GNUTLS_CB_TLS_UNIQUE, &cb );
+	if ( rc == 0 ) {
+		int len = cb.size;
+		if ( len > buf->bv_len )
+			len = buf->bv_len;
+		buf->bv_len = len;
+		memcpy( buf->bv_val, cb.data, len );
+		return len;
+	}
+	return 0;
+}
+
+static const char *
+tlsg_session_version( tls_session *sess )
+{
+	tlsg_session *s = (tlsg_session *)sess;
+	return gnutls_protocol_get_name(gnutls_protocol_get_version( s->session ));
+}
+
+static const char *
+tlsg_session_cipher( tls_session *sess )
+{
+	tlsg_session *s = (tlsg_session *)sess;
+	return gnutls_cipher_get_name(gnutls_cipher_get( s->session ));
+}
+
+static int
+tlsg_session_peercert( tls_session *sess, struct berval *der )
+{
+	tlsg_session *s = (tlsg_session *)sess;
+	const gnutls_datum_t *peer_cert_list;
+	unsigned int list_size;
+
+	peer_cert_list = gnutls_certificate_get_peers( s->session, &list_size );
+	if (!peer_cert_list)
+		return -1;
+	der->bv_len = peer_cert_list[0].size;
+	der->bv_val = LDAP_MALLOC( der->bv_len );
+	if (!der->bv_val)
+		return -1;
+	memcpy(der->bv_val, peer_cert_list[0].data, der->bv_len);
+	return 0;
+}
+
 /* suites is a string of colon-separated cipher suite names. */
 static int
 tlsg_parse_ciphers( tlsg_ctx *ctx, char *suites )
 {
-#ifdef HAVE_CIPHERSUITES
 	const char *err;
-	return gnutls_priority_init( &ctx->prios, suites, &err );
-#else
-	char *ptr, *end;
-	int i, j, len, num;
-	int *list, nkx = 0, ncipher = 0, nmac = 0;
-	int *kx, *cipher, *mac;
-
-	num = 0;
-	ptr = suites;
-	do {
-		end = strchr(ptr, ':');
-		if ( end )
-			len = end - ptr;
-		else
-			len = strlen(ptr);
-		for (i=0; i<tlsg_n_ciphers; i++) {
-			if ( !strncasecmp( tlsg_ciphers[i].name, ptr, len )) {
-				num++;
-				break;
-			}
-		}
-		if ( i == tlsg_n_ciphers ) {
-			/* unrecognized cipher suite */
-			return -1;
-		}
-		ptr += len + 1;
-	} while (end);
-
-	/* Space for all 3 lists */
-	list = LDAP_MALLOC( (num+1) * sizeof(int) * 3 );
-	if ( !list )
-		return -1;
-	kx = list;
-	cipher = kx+num+1;
-	mac = cipher+num+1;
-
-	ptr = suites;
-	do {
-		end = strchr(ptr, ':');
-		if ( end )
-			len = end - ptr;
-		else
-			len = strlen(ptr);
-		for (i=0; i<tlsg_n_ciphers; i++) {
-			/* For each cipher suite, insert its algorithms into
-			 * their respective priority lists. Make sure they
-			 * only appear once in each list.
-			 */
-			if ( !strncasecmp( tlsg_ciphers[i].name, ptr, len )) {
-				for (j=0; j<nkx; j++)
-					if ( kx[j] == tlsg_ciphers[i].kx )
-						break;
-				if ( j == nkx )
-					kx[nkx++] = tlsg_ciphers[i].kx;
-				for (j=0; j<ncipher; j++)
-					if ( cipher[j] == tlsg_ciphers[i].cipher )
-						break;
-				if ( j == ncipher ) 
-					cipher[ncipher++] = tlsg_ciphers[i].cipher;
-				for (j=0; j<nmac; j++)
-					if ( mac[j] == tlsg_ciphers[i].mac )
-						break;
-				if ( j == nmac )
-					mac[nmac++] = tlsg_ciphers[i].mac;
-				break;
-			}
-		}
-		ptr += len + 1;
-	} while (end);
-	kx[nkx] = 0;
-	cipher[ncipher] = 0;
-	mac[nmac] = 0;
-	ctx->kx_list = kx;
-	ctx->cipher_list = cipher;
-	ctx->mac_list = mac;
-	return 0;
-#endif
+	int rc = gnutls_priority_init( &ctx->prios, suites, &err );
+	if ( rc )
+		ctx->prios = NULL;
+	return rc;
 }
 
 /*
@@ -1110,6 +974,10 @@ tls_impl ldap_int_tls_impl = {
 	tlsg_session_peer_dn,
 	tlsg_session_chkhost,
 	tlsg_session_strength,
+	tlsg_session_unique,
+	tlsg_session_version,
+	tlsg_session_cipher,
+	tlsg_session_peercert,
 
 	&tlsg_sbio,
 

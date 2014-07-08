@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 2003-2012 The OpenLDAP Foundation.
+ * Copyright 2003-2014 The OpenLDAP Foundation.
  * Portions Copyright 2003 by IBM Corporation.
  * Portions Copyright 2003-2008 by Howard Chu, Symas Corporation.
  * All rights reserved.
@@ -590,7 +590,8 @@ check_syncprov(
 		slap_compose_sync_cookie( NULL, &si->si_syncCookie.octet_str,
 			si->si_syncCookie.ctxcsn, si->si_syncCookie.rid,
 			si->si_syncCookie.sid );
-		slap_parse_sync_cookie( &si->si_syncCookie, NULL );
+		ch_free( si->si_syncCookie.sids );
+		slap_reparse_sync_cookie( &si->si_syncCookie, op->o_tmpmemctx );
 	}
 	ldap_pvt_thread_mutex_unlock( &si->si_cookieState->cs_mutex );
 	return changed;
@@ -667,11 +668,11 @@ do_syncrep1(
 
 			LDAP_STAILQ_REMOVE( &slap_sync_cookie, sc, sync_cookie, sc_next );
 
-			/* ctxcsn wasn't parsed yet, do it now */
-			slap_parse_sync_cookie( sc, NULL );
 			slap_sync_cookie_free( &si->si_syncCookie, 0 );
-			slap_dup_sync_cookie( &si->si_syncCookie, sc );
-			slap_sync_cookie_free( sc, 1 );
+			si->si_syncCookie.octet_str = sc->octet_str;
+			ch_free( sc );
+			/* ctxcsn wasn't parsed yet, do it now */
+			slap_parse_sync_cookie( &si->si_syncCookie, NULL );
 		} else {
 			ldap_pvt_thread_mutex_lock( &si->si_cookieState->cs_mutex );
 			if ( !si->si_cookieState->cs_num ) {
@@ -1344,6 +1345,9 @@ do_syncrep2(
 				ldap_memfree( retoid );
 				ber_bvfree( retdata );
 
+				if ( rc )
+					goto done;
+
 			} else {
 				Debug( LDAP_DEBUG_ANY, "do_syncrep2: %s "
 					"unknown intermediate response (%d)\n",
@@ -1363,8 +1367,8 @@ do_syncrep2(
 		}
 		if ( !BER_BVISNULL( &syncCookie.octet_str ) ) {
 			slap_sync_cookie_free( &syncCookie_req, 0 );
-			slap_dup_sync_cookie( &syncCookie_req, &syncCookie );
-			slap_sync_cookie_free( &syncCookie, 0 );
+			syncCookie_req = syncCookie;
+			memset( &syncCookie, 0, sizeof( syncCookie ));
 		}
 		ldap_msgfree( msg );
 		msg = NULL;
@@ -1534,6 +1538,10 @@ reload:
 		op->o_ndn = op->o_bd->be_rootndn;
 		rc = do_syncrep2( op, si );
 		if ( rc == LDAP_SYNC_REFRESH_REQUIRED )	{
+			if ( BER_BVISNULL( &si->si_syncCookie.octet_str ))
+				slap_compose_sync_cookie( NULL, &si->si_syncCookie.octet_str,
+					si->si_syncCookie.ctxcsn, si->si_syncCookie.rid,
+					si->si_syncCookie.sid );
 			rc = ldap_sync_search( si, op->o_tmpmemctx );
 			goto reload;
 		}
@@ -5080,14 +5088,15 @@ parse_syncrepl_line(
 					STRLENOF( STRICT_REFRESH ) ) )
 		{
 			si->si_strict_refresh = 1;
-		} else if ( bindconf_parse( c->argv[i], &si->si_bindconf ) ) {
+		} else if ( !bindconf_parse( c->argv[i], &si->si_bindconf ) ) {
+			si->si_got |= GOT_BINDCONF;
+		} else {
 			snprintf( c->cr_msg, sizeof( c->cr_msg ),
 				"Error: parse_syncrepl_line: "
 				"unable to parse \"%s\"\n", c->argv[ i ] );
 			Debug( LDAP_DEBUG_ANY, "%s: %s.\n", c->log, c->cr_msg, 0 );
 			return -1;
 		}
-		si->si_got |= GOT_BINDCONF;
 	}
 
 	if ( ( si->si_got & GOT_REQUIRED ) != GOT_REQUIRED ) {
@@ -5101,11 +5110,11 @@ parse_syncrepl_line(
 	}
 
 	if ( !be_issubordinate( c->be, &si->si_base ) && !( si->si_got & GOT_SUFFIXM )) {
-		ch_free( si->si_base.bv_val );
-		BER_BVZERO( &si->si_base );
 		snprintf( c->cr_msg, sizeof( c->cr_msg ),
 			"Base DN \"%s\" is not within the database naming context",
-			val );
+			si->si_base.bv_val );
+		ch_free( si->si_base.bv_val );
+		BER_BVZERO( &si->si_base );
 		Debug( LDAP_DEBUG_ANY, "%s: %s.\n", c->log, c->cr_msg, 0 );
 		return -1;
 	}

@@ -2,7 +2,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -159,8 +159,8 @@ slap_op_free( Operation *op, void *ctx )
 void
 slap_op_time(time_t *t, int *nop)
 {
-	ldap_pvt_thread_mutex_lock( &slap_op_mutex );
 	*t = slap_get_time();
+	ldap_pvt_thread_mutex_lock( &slap_op_mutex );
 	if ( *t == last_time ) {
 		*nop = ++last_incr;
 	} else {

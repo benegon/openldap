@@ -1,7 +1,7 @@
 /* $OpenLDAP$ */
 /* This work is part of OpenLDAP Software <http://www.openldap.org/>.
  *
- * Copyright 1998-2012 The OpenLDAP Foundation.
+ * Copyright 1998-2014 The OpenLDAP Foundation.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -376,6 +376,16 @@ LDAP_SLAPD_F (struct berval *) be_root_dn LDAP_P(( Backend *be ));
 LDAP_SLAPD_F (int) be_entry_get_rw LDAP_P(( Operation *o,
 		struct berval *ndn, ObjectClass *oc,
 		AttributeDescription *at, int rw, Entry **e ));
+
+/* "backend->ophandler(op,rs)" wrappers, applied by contrib:wrap_slap_ops */
+#define SLAP_OP(which, op, rs)  slap_bi_op((op)->o_bd->bd_info, which, op, rs)
+#define slap_be_op(be, which, op, rs) slap_bi_op((be)->bd_info, which, op, rs)
+#if !(defined(USE_RS_ASSERT) && (USE_RS_ASSERT))
+#define slap_bi_op(bi, which, op, rs) ((&(bi)->bi_op_bind)[which](op, rs))
+#endif
+LDAP_SLAPD_F (int) (slap_bi_op) LDAP_P(( BackendInfo *bi,
+	slap_operation_t which, Operation *op, SlapReply *rs ));
+
 LDAP_SLAPD_F (int) be_entry_release_rw LDAP_P((
 	Operation *o, Entry *e, int rw ));
 #define be_entry_release_r( o, e ) be_entry_release_rw( o, e, 0 )
@@ -748,6 +758,8 @@ LDAP_SLAPD_F (int) slap_client_connect LDAP_P(( LDAP **ldp, slap_bindconf *sb ))
 LDAP_SLAPD_F (int) config_generic_wrapper LDAP_P(( Backend *be,
 	const char *fname, int lineno, int argc, char **argv ));
 LDAP_SLAPD_F (char *) anlist_unparse LDAP_P(( AttributeName *, char *, ber_len_t buflen ));
+LDAP_SLAPD_F (int) slap_keepalive_parse( struct berval *val, void *bc,
+	slap_cf_aux_table *tab0, const char *tabmsg, int unparse );
 
 #ifdef LDAP_SLAPI
 LDAP_SLAPD_V (int) slapi_plugins_used;
@@ -875,8 +887,8 @@ LDAP_SLAPD_F (void) slapd_set_write LDAP_P((ber_socket_t s, int wake));
 LDAP_SLAPD_F (void) slapd_clr_write LDAP_P((ber_socket_t s, int wake));
 LDAP_SLAPD_F (void) slapd_set_read LDAP_P((ber_socket_t s, int wake));
 LDAP_SLAPD_F (int) slapd_clr_read LDAP_P((ber_socket_t s, int wake));
-LDAP_SLAPD_F (void) slapd_clr_writetime LDAP_P((time_t old));
-LDAP_SLAPD_F (time_t) slapd_get_writetime LDAP_P((void));
+LDAP_SLAPD_F (int) slapd_wait_writer( ber_socket_t sd );
+LDAP_SLAPD_F (void) slapd_shutsock( ber_socket_t sd );
 
 LDAP_SLAPD_V (volatile sig_atomic_t) slapd_abrupt_shutdown;
 LDAP_SLAPD_V (volatile sig_atomic_t) slapd_shutdown;
@@ -1182,6 +1194,8 @@ LDAP_SLAPD_F (int) slap_sort_csn_sids LDAP_P((
 LDAP_SLAPD_F (void) slap_insert_csn_sids LDAP_P((
 				struct sync_cookie *ck, int, int, struct berval * ));
 LDAP_SLAPD_F (int) slap_parse_sync_cookie LDAP_P((
+				struct sync_cookie *, void *memctx ));
+LDAP_SLAPD_F (void) slap_reparse_sync_cookie LDAP_P((
 				struct sync_cookie *, void *memctx ));
 LDAP_SLAPD_F (int) slap_init_sync_cookie_ctxcsn LDAP_P((
 				struct sync_cookie * ));
@@ -2064,14 +2078,10 @@ LDAP_SLAPD_V (time_t)		starttime;
 
 LDAP_SLAPD_V (ldap_pvt_thread_pool_t)	connection_pool;
 LDAP_SLAPD_V (int)			connection_pool_max;
+LDAP_SLAPD_V (int)			connection_pool_queues;
 LDAP_SLAPD_V (int)			slap_tool_thread_max;
 
 LDAP_SLAPD_V (ldap_pvt_thread_mutex_t)	entry2str_mutex;
-
-#ifndef LDAP_DEVEL
-	/* to be removed with 2.5 */
-#define gmtime_mutex ldap_int_gmtime_mutex
-#endif /* ! LDAP_DEVEL */
 
 LDAP_SLAPD_V (ldap_pvt_thread_mutex_t)	ad_index_mutex;
 LDAP_SLAPD_V (ldap_pvt_thread_mutex_t)	ad_undef_mutex;
